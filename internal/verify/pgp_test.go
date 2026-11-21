@@ -236,6 +236,31 @@ func TestVerifyDetached(t *testing.T) {
 
 // go-crypto's v1 defaults accept SHA-1 message signatures, so the rejection
 // in verifyOne is what enforces the policy.
+func TestCheckIssuer(t *testing.T) {
+	a, b := newEntity(t, nil), newEntity(t, nil)
+	kr, err := NewKeyring([][]byte{pubArmored(t, a)}, []string{fpOf(a.PrimaryKey)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := []byte("an ISO")
+	if fp, err := kr.CheckIssuer(armoredSig(t, a, data, nil)); err != nil || fp != fpOf(a.PrimaryKey) {
+		t.Errorf("allowed key: %q, %v", fp, err)
+	}
+	if fp, err := kr.CheckIssuer(join(armoredSig(t, b, data, nil), armoredSig(t, a, data, nil))); err != nil || fp != fpOf(a.PrimaryKey) {
+		t.Errorf("second block allowed: %q, %v", fp, err)
+	}
+	for name, sig := range map[string][]byte{
+		"other key": armoredSig(t, b, data, nil),
+		"sha1":      sha1Sig(t, a, data),
+		"empty":     nil,
+		"garbage":   []byte("<html>not a signature</html>"),
+	} {
+		if _, err := kr.CheckIssuer(sig); err == nil {
+			t.Errorf("%s: CheckIssuer accepted it", name)
+		}
+	}
+}
+
 func TestSHA1AcceptedByGoCryptoDefaults(t *testing.T) {
 	a := newEntity(t, nil)
 	sig := sha1Sig(t, a, signedData)

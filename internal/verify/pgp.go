@@ -112,15 +112,67 @@ type sigPacket struct {
 	err error
 }
 
-func (k *Keyring) verify(sig []byte, open func() (io.ReadCloser, error)) (string, error) {
+// CheckIssuer reports the allowed fingerprint that a detached signature
+// names as its signer, without the signed data. It doesn't verify the
+// signature cryptographically; that happens at download time with
+// VerifyDetachedFile. It catches what a catalog check can see in advance: a
+// missing or unreadable signature file, a weak hash, and a distro that has
+// moved to a key the entry doesn't pin.
+func (k *Keyring) CheckIssuer(sig []byte) (string, error) {
+	sigs, err := sigPackets(sig)
+	if err != nil {
+		return "", err
+	}
+	if len(sigs) == 0 {
+		return "", errors.New("no signatures found")
+	}
+	var fails []string
+	for i, s := range sigs {
+		fp, err := k.issuerOne(s)
+		if err == nil {
+			return fp, nil
+		}
+		fails = append(fails, fmt.Sprintf("signature %d: %v", i+1, err))
+	}
+	return "", fmt.Errorf("no signature names an allowed key: %s", strings.Join(fails, "; "))
+}
+
+func (k *Keyring) issuerOne(s sigPacket) (string, error) {
+	if s.err != nil {
+		return "", s.err
+	}
+	if s.sig.IssuerKeyId == nil {
+		return "", errors.New("signature names no issuer")
+	}
+	if !strongHashes[s.sig.Hash] {
+		return "", fmt.Errorf("key %s used weak hash %v", issuerName(s.sig), s.sig.Hash)
+	}
+	keys := k.keys.KeysById(*s.sig.IssuerKeyId)
+	if len(keys) == 0 {
+		return "", fmt.Errorf("unknown key %s", issuerName(s.sig))
+	}
+	return k.allowedSigner(keys[0].Entity, s.sig)
+}
+
+// sigPackets splits a binary or armored detached signature into its
+// signature packets.
+func sigPackets(sig []byte) ([]sigPacket, error) {
 	bodies := [][]byte{sig}
 	if bytes.HasPrefix(bytes.TrimSpace(sig), []byte("-----BEGIN PGP SIGNATURE-----")) {
 		var err error
 		if bodies, err = armorBodies(sig, openpgp.SignatureType); err != nil {
-			return "", err
+			return nil, err
 		}
 	}
-	return k.verifyPackets(splitPackets(bodies), open)
+	return splitPackets(bodies), nil
+}
+
+func (k *Keyring) verify(sig []byte, open func() (io.ReadCloser, error)) (string, error) {
+	sigs, err := sigPackets(sig)
+	if err != nil {
+		return "", err
+	}
+	return k.verifyPackets(sigs, open)
 }
 
 // verifyPackets passes when any packet is a valid signature by an allowed

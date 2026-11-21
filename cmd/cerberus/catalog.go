@@ -163,13 +163,13 @@ func (a *app) checkCatalog(cmd *cobra.Command, ids []string, arch string) error 
 func checkEntry(ctx context.Context, cat *catalog.Catalog, client *download.Client, j catalogJob) (string, error) {
 	e := j.entry
 	opt := resolve.Options{Arch: j.arch}
+	var kr *verify.Keyring
 	if len(e.Keys) > 0 {
 		keys, err := cat.KeysFor(e)
 		if err != nil {
 			return "", err
 		}
-		kr, err := verify.NewKeyring(keys, e.Fingerprints)
-		if err != nil {
+		if kr, err = verify.NewKeyring(keys, e.Fingerprints); err != nil {
 			return "", err
 		}
 		opt.Verifier = kr
@@ -194,7 +194,20 @@ func checkEntry(ctx context.Context, cat *catalog.Catalog, client *download.Clie
 	case rel.SignedBy != "":
 		trust = "signed by " + rel.SignedBy[:min(16, len(rel.SignedBy))]
 	case rel.ISOSignatureURL != "":
-		trust = "ISO signature checked at download"
+		// The signature covers the ISO, which a check doesn't download, so
+		// confirm the signature file exists and names a pinned key.
+		if kr == nil {
+			return "", fmt.Errorf("%s declares an ISO signature but pins no keys", e.ID)
+		}
+		doc, err := client.Get(ctx, rel.ISOSignatureURL)
+		if err != nil {
+			return "", fmt.Errorf("ISO signature: %w", err)
+		}
+		fp, err := kr.CheckIssuer(doc.Body)
+		if err != nil {
+			return "", fmt.Errorf("ISO signature %s: %w", rel.ISOSignatureURL, err)
+		}
+		trust = "ISO signed by " + fp[:16] + " (verified at download)"
 	}
 	return fmt.Sprintf("✓ %s %s %s %s %s %s %s", e.ID, j.arch, rel.Version, rel.Filename, sizeText, rel.Checksum.Algo, trust), nil
 }

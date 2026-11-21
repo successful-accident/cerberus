@@ -1,6 +1,15 @@
 # cerberus build plan
 
-**Status (2026-11-21):** phases 0, 1 and 2 are done. Next is phase 3, the catalog.
+**Status (2026-11-21):** phases 0 to 3 are done. Next is phase 4, the real run.
+- **Phase 3:** 45 catalog entries in six family files.
+  - 59 of 65 entry/arch checks pass live from the sandbox. The other 6 are GitHub-hosted (talos, rescuezilla, netboot-xyz, shredos), and the weekly CI job checks them.
+  - The independent verifier confirmed 21 of 25 pinned fingerprints on official pages. The other 4 are confirmed through the distro's documented chain, as each entry's notes explain: Proxmox ×2 via the keyring hash the wiki prints, Qubes via the master-key certification, and SystemRescue via the official key file (trust on first use).
+  - Unsigned on purpose:
+    - Tumbleweed, because it uses v3 signatures, which the verifier doesn't read yet;
+    - XCP-ng, because its signature uses SHA-1;
+    - MX Linux, because its fingerprint can't be confirmed;
+    - Pop!_OS, CentOS Stream, Bazzite, Void and NixOS, because they publish no OpenPGP signature.
+  - `catalog check` now confirms each ISO's `.sig` names a pinned key (`Keyring.CheckIssuer`).
 - **Phase 1** (`32d8a7a`..`8abb0a4`): every lane passes under the race detector.
 - **Phase 2:** the engine, config and CLI are done, and all 10 packages pass `go test -race`. Against the live feeds, the built binary's `catalog check` resolves all three seed entries on both architectures, and `init`, `status` and `check` work.
 - **Integration review changes:**
