@@ -1,8 +1,8 @@
 # cerberus build plan
 
-**Status (2026-11-21):** phases 0 and 1 are done.
+**Status (2026-11-21):** phases 0, 1 and 2 are done. Next is phase 3, the catalog.
 - **Phase 1** (`32d8a7a`..`8abb0a4`): every lane passes under the race detector.
-- **Phase 2:** the engine and config are done (`0a56fa6`), and the CLI is being written.
+- **Phase 2:** the engine, config and CLI are done, and all 10 packages pass `go test -race`. Against the live feeds, the built binary's `catalog check` resolves all three seed entries on both architectures, and `init`, `status` and `check` work.
 - **Integration review changes:**
   - A failed signature stops the candidate fallback (`resolve.ErrSignature`).
   - `download.Head` and `Size` treat a non-2xx status as an error.
