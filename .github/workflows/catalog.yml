@@ -1,0 +1,27 @@
+name: catalog
+
+# Resolves every catalog entry against the live distro feeds once a week, so a
+# distro that moves its files fails here before it fails anyone's nightly sync.
+on:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: catalog
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: go run ./cmd/cerberus catalog check
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
