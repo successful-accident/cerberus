@@ -1,6 +1,6 @@
 # cerberus build plan
 
-**Status (2026-11-21):** phase 0 is in progress. The contract skeleton, docs and README are being committed now. Next is phase 1, the package lanes. Update this line whenever a phase starts or ends.
+**Status (2026-11-21):** phase 0 is done (`5a2051e`). The build, vet and checksum tests pass. GitHub detects GPL-3.0 and renders the README. The owner still needs to set the About box and upload the social preview, because the sandbox proxy blocks both. Phase 1 (the package lanes) is running, with phase 2 starting alongside it. Update this line whenever a phase starts or ends.
 
 ## What cerberus is
 
