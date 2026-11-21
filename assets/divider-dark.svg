@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 20" width="240" height="20">
+<defs>
+<pattern id="key" x="0" y="4" width="24" height="12" patternUnits="userSpaceOnUse"><path d="M0 11 H20 V1 H6 V8 H15 V4 H10" fill="none" stroke="#D3A257" stroke-width="1.2" stroke-opacity="0.55"/></pattern>
+<linearGradient id="fadeL" x1="0" x2="1"><stop offset="0" stop-color="#D3A257" stop-opacity="0"/><stop offset="1" stop-color="#D3A257" stop-opacity="0.85"/></linearGradient>
+<linearGradient id="fadeR" x1="0" x2="1"><stop offset="0" stop-color="#D3A257" stop-opacity="0.85"/><stop offset="1" stop-color="#D3A257" stop-opacity="0"/></linearGradient>
+</defs>
+<rect x="0" y="9.4" width="80" height="1.2" fill="url(#fadeL)"/>
+<rect x="160" y="9.4" width="80" height="1.2" fill="url(#fadeR)"/>
+<rect x="84" y="4" width="72" height="12" fill="url(#key)"><animate attributeName="opacity" values="0.7;1;0.7" dur="5s" repeatCount="indefinite"/></rect>
+</svg>

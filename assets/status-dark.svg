@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 840 384" width="840" height="384">
+<defs>
+<linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0B0F14"/><stop offset="1" stop-color="#141C25"/></linearGradient>
+<pattern id="grid" width="28" height="28" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="0.9" fill="#8C96A2" fill-opacity="0.18"/></pattern>
+<pattern id="key" x="0" y="12" width="24" height="12" patternUnits="userSpaceOnUse"><path d="M0 11 H20 V1 H6 V8 H15 V4 H10" fill="none" stroke="#D3A257" stroke-width="1.2" stroke-opacity="0.55"/></pattern>
+<pattern id="key2" x="0" y="12" width="24" height="12" patternUnits="userSpaceOnUse"><path d="M0 11 H20 V1 H6 V8 H15 V4 H10" fill="none" stroke="#D3A257" stroke-width="1.3" stroke-opacity="0.95"/></pattern>
+<filter id="soft" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="24"/></filter>
+<filter id="glow" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="5"/></filter>
+</defs>
+<rect width="840" height="384" rx="8" fill="url(#bg)"/>
+<rect x="10" y="10" width="820" height="364" rx="8" fill="#0D1218" stroke="#2A3440"/>
+<path d="M10 40 H830" stroke="#2A3440"/>
+<circle cx="32" cy="25" r="5" fill="#2A3440"/><circle cx="50" cy="25" r="5" fill="#2A3440"/><circle cx="68" cy="25" r="5" fill="#2A3440"/>
+<text x="420" y="29" text-anchor="middle" font-family="'SF Mono', Menlo, Consolas, 'Courier New', monospace" font-size="11" fill="#8C96A2">root@pve: ~</text>
+<g font-family="'SF Mono', Menlo, Consolas, 'Courier New', monospace" font-size="12">
+<text x="32" y="68"><tspan fill="#D3A257">$ </tspan><tspan fill="#ECE5D6">cerberus</tspan></text>
+<text x="32" y="92" fill="#8C96A2">cerberus 0.1.0 · Proxmox VE 9.2 · storage local (/var/lib/vz/template/iso)</text>
+<text x="32" y="110" fill="#8C96A2">next sync today 04:30, plus up to an hour of random delay</text>
+<g font-size="10.5" letter-spacing="1" fill="#8C96A2"><text x="32" y="140">DISTRO</text><text x="232" y="140">VERSION</text><text x="330" y="140">LAST CHECK</text><text x="446" y="140">STATUS</text><text x="606" y="140">SIZE</text><text x="690" y="140">KEPT</text></g>
+<path d="M32 148 H808" stroke="#2A3440"/>
+<text x="32" y="162" fill="#ECE5D6">Ubuntu Server LTS</text><text x="232" y="162" fill="#ECE5D6">26.04.1</text><text x="330" y="162" fill="#8C96A2">today 04:41</text><text x="446" y="162" fill="#ECE5D6">✓ up to date</text><text x="606" y="162" fill="#ECE5D6">3.1 GB</text><text x="690" y="162" fill="#ECE5D6">1</text><text x="32" y="182" fill="#ECE5D6">Debian netinst</text><text x="232" y="182" fill="#ECE5D6">13.7.0</text><text x="330" y="182" fill="#8C96A2">today 04:41</text><text x="446" y="182" fill="#D3A257">↑ updated</text><text x="606" y="182" fill="#ECE5D6">0.8 GB</text><text x="690" y="182" fill="#ECE5D6">1</text><text x="32" y="202" fill="#ECE5D6">Proxmox VE</text><text x="232" y="202" fill="#ECE5D6">9.2-1</text><text x="330" y="202" fill="#8C96A2">today 04:41</text><text x="446" y="202" fill="#ECE5D6">✓ up to date</text><text x="606" y="202" fill="#ECE5D6">1.6 GB</text><text x="690" y="202" fill="#ECE5D6">1</text><text x="32" y="222" fill="#ECE5D6">Rocky Linux 10</text><text x="232" y="222" fill="#ECE5D6">10.3</text><text x="330" y="222" fill="#8C96A2">today 04:42</text><text x="446" y="222" fill="#ECE5D6">✓ up to date</text><text x="606" y="222" fill="#ECE5D6">3.8 GB</text><text x="690" y="222" fill="#ECE5D6">2</text><text x="32" y="242" fill="#ECE5D6">Kali Linux</text><text x="232" y="242" fill="#ECE5D6">2026.2</text><text x="330" y="242" fill="#8C96A2">today 04:42</text><text x="446" y="242" fill="#E36B45">✗ failed</text><text x="606" y="242" fill="#ECE5D6">4.4 GB</text><text x="690" y="242" fill="#ECE5D6">1</text><text x="446" y="259" font-size="10.5" fill="#E36B45">2026.3: checksum mismatch, kept 2026.2</text><text x="32" y="279" fill="#ECE5D6">SystemRescue</text><text x="232" y="279" fill="#ECE5D6">13.03</text><text x="330" y="279" fill="#8C96A2">today 04:42</text><text x="446" y="279" fill="#ECE5D6">✓ up to date</text><text x="606" y="279" fill="#ECE5D6">1.2 GB</text><text x="690" y="279" fill="#ECE5D6">1</text>
+<path d="M32 296 H808" stroke="#2A3440"/>
+<text x="32" y="316" fill="#8C96A2">managed 14.9 GB · other files 6.2 GB · free 412 GB, 46 GB held in reserve</text>
+<rect x="44" y="331" width="76" height="20" rx="3" fill="#D3A257" fill-opacity="0.18"/>
+<text x="32" y="345"><tspan fill="#D3A257">›</tspan></text>
+<text x="50" y="345" fill="#ECE5D6">Sync now</text>
+<text x="136" y="345" fill="#8C96A2">Check only</text>
+<text x="232" y="345" fill="#8C96A2">Choose distros</text>
+<text x="358" y="345" fill="#8C96A2">Settings</text>
+<text x="438" y="345" fill="#8C96A2">Quit</text>
+<rect x="476" y="334" width="8" height="14" fill="#D3A257"><animate attributeName="opacity" values="1;0" dur="1.2s" calcMode="discrete" repeatCount="indefinite"/></rect>
+</g>
+</svg>
