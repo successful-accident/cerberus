@@ -23,6 +23,32 @@ func newClient(srv *httptest.Server, opts ...Option) *Client {
 	return New("cerberus-test", append([]Option{WithHTTPClient(srv.Client())}, opts...)...)
 }
 
+func TestRetriesTransientErrors(t *testing.T) {
+	var calls int
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.URL.Path == "/flaky" && calls < 3 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		if r.URL.Path == "/down" {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		w.Header().Set("Content-Length", "4321")
+	}))
+	defer srv.Close()
+	c := newClient(srv)
+	c.retryWaits = []time.Duration{time.Millisecond, time.Millisecond}
+	if n, err := c.Size(context.Background(), srv.URL+"/flaky"); err != nil || n != 4321 {
+		t.Fatalf("two 503s then 200: Size = %d, %v; want 4321 after retries", n, err)
+	}
+	calls = 0
+	if _, err := c.Size(context.Background(), srv.URL+"/down"); err == nil || !strings.Contains(err.Error(), "502") || calls != 3 {
+		t.Fatalf("persistent 502: err %v after %d calls, want a 502 error after 3", err, calls)
+	}
+}
+
 func TestRedirects(t *testing.T) {
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {

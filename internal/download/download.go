@@ -37,6 +37,7 @@ type Client struct {
 	githubToken string
 	maxDoc      int64
 	stall       time.Duration
+	retryWaits  []time.Duration // waits before retrying a 502/503/504; nil means 2s, then 5s
 }
 
 // Option configures a Client.
@@ -129,7 +130,30 @@ func (c *Client) do(ctx context.Context, method, rawURL string, header http.Head
 	if a := authorization(req.URL, c.githubToken); a != "" {
 		req.Header.Set("Authorization", a)
 	}
-	return c.hc.Do(req)
+	// Mirrors and CDNs answer 502, 503 or 504 now and then. A request
+	// without a body is safe to repeat, so retry those briefly before
+	// reporting them.
+	waits := c.retryWaits
+	if waits == nil {
+		waits = []time.Duration{2 * time.Second, 5 * time.Second}
+	}
+	for attempt := 0; ; attempt++ {
+		resp, err := c.hc.Do(req)
+		if err != nil || attempt == len(waits) {
+			return resp, err
+		}
+		switch resp.StatusCode {
+		case http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		default:
+			return resp, nil
+		}
+		resp.Body.Close()
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(waits[attempt]):
+		}
+	}
 }
 
 // Get fetches url and returns its body. A non-2xx status is an error that
