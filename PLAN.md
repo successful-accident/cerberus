@@ -1,6 +1,18 @@
 # cerberus build plan
 
-**Status (2026-11-21):** phase 0 is done (`5a2051e`). The build, vet and checksum tests pass. GitHub detects GPL-3.0 and renders the README. The owner still needs to set the About box and upload the social preview, because the sandbox proxy blocks both. Phase 1 (the package lanes) is running, with phase 2 starting alongside it. Update this line whenever a phase starts or ends.
+**Status (2026-11-21):** phases 0 and 1 are done.
+- **Phase 1** (`32d8a7a`..`8abb0a4`): every lane passes under the race detector.
+- **Phase 2:** the engine and config are done (`0a56fa6`), and the CLI is being written.
+- **Integration review changes:**
+  - A failed signature stops the candidate fallback (`resolve.ErrSignature`).
+  - `download.Head` and `Size` treat a non-2xx status as an error.
+  - A null jq value counts as an absent variable.
+  - `Reconcile` never deletes a `.part` file that state doesn't name. This replaces the earlier "deletes unknown parts" wording, to honor rule 5.
+- **Still with the owner:**
+  - the About box and the social preview, which the sandbox proxy blocks;
+  - deleting the stale `wip/phase-1-2` branch, which the proxy won't delete.
+
+Update this line whenever a phase starts or ends.
 
 ## What cerberus is
 
@@ -16,7 +28,7 @@ It finds out what kind of host it's on:
 
 ## Decisions
 
-- **Language and platform:** Go 1.24, shipped as one static binary for linux amd64 and arm64.
+- **Language and platform:** Go 1.26 (the floor set by golang.org/x/sys), shipped as one static binary for linux amd64 and arm64.
 - **Pinned dependencies:**
   - cobra v1.10.2
   - huh v1.0.0 (accessible mode with `WithInput` and `WithOutput`, so forms can be tested from scripts)

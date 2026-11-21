@@ -88,7 +88,7 @@ other, and installs the binary:
 cd /tmp && curl -fsSL --remote-name-all https://github.com/successful-accident/cerberus/releases/latest/download/{cerberus-linux-amd64,SHA256SUMS} && sha256sum --ignore-missing -c SHA256SUMS && install -m 0755 cerberus-linux-amd64 /usr/local/bin/cerberus
 ```
 
-On ARM, use `cerberus-linux-arm64`. With Go 1.24 or later you can build it
+On ARM, use `cerberus-linux-arm64`. With Go 1.26 or later you can build it
 instead:
 
 ```bash
