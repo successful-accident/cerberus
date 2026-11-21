@@ -12,12 +12,20 @@
 package catalog
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"io/fs"
+	"os"
+	"path"
+	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
-	_ "go.yaml.in/yaml/v3" // used by Load
+	"github.com/itchyny/gojq"
+	"go.yaml.in/yaml/v3"
 )
 
 // Category is a use-case group shown in the picker and the README.
@@ -99,7 +107,8 @@ type Step struct {
 	Match string `yaml:"match,omitempty"`
 	// JQ is a jq program run over the body parsed as JSON, or as YAML when
 	// that fails. Each output must be an object whose values are strings,
-	// numbers or booleans; its keys become the candidate's variables.
+	// numbers, booleans or null. Its keys become the candidate's variables,
+	// except that null values are skipped, as if the key were absent.
 	JQ string `yaml:"jq,omitempty"`
 	// Exclude drops candidates whose text it matches. A regex candidate's
 	// text is the whole match; a jq candidate's text is its JSON encoding.
@@ -154,7 +163,93 @@ type Catalog struct {
 // winning. Load sets each entry's Source, fills Entries, and returns Lint's
 // error if the merged catalog is invalid.
 func Load(embedded fs.FS, overrideDirs ...string) (*Catalog, error) {
-	panic("catalog.Load: not implemented (phase 1)")
+	c := &Catalog{byID: map[string]*Entry{}, keys: map[string][]byte{}}
+	// layer and pos record where each ID last landed, so a later layer can
+	// replace it while a repeat within one layer stays visible to Lint.
+	layer := map[string]int{}
+	pos := map[string]int{}
+	loadLayer := func(n int, fsys fs.FS, root string, label func(string) string) error {
+		files, err := fs.Glob(fsys, path.Join(root, "*.yaml"))
+		if err != nil {
+			return err
+		}
+		for _, name := range files {
+			data, err := fs.ReadFile(fsys, name)
+			if err != nil {
+				return err
+			}
+			source := label(name)
+			var list []*Entry
+			dec := yaml.NewDecoder(bytes.NewReader(data))
+			dec.KnownFields(true)
+			if err := dec.Decode(&list); err != nil && !errors.Is(err, io.EOF) {
+				return fmt.Errorf("%s: %w", source, err)
+			}
+			for _, e := range list {
+				if e == nil {
+					return fmt.Errorf("%s: empty list item", source)
+				}
+				e.Source = source
+				if i, ok := pos[e.ID]; ok && layer[e.ID] < n {
+					c.Entries[i] = e
+				} else {
+					pos[e.ID] = len(c.Entries)
+					c.Entries = append(c.Entries, e)
+				}
+				layer[e.ID] = n
+			}
+		}
+		keys, err := fs.Glob(fsys, path.Join(root, "keys", "*.asc"))
+		if err != nil {
+			return err
+		}
+		for _, name := range keys {
+			data, err := fs.ReadFile(fsys, name)
+			if err != nil {
+				return err
+			}
+			c.keys[strings.TrimSuffix(path.Base(name), ".asc")] = data
+		}
+		return nil
+	}
+
+	if _, err := fs.Stat(embedded, "catalog"); err != nil {
+		return nil, fmt.Errorf("catalog: %w", err)
+	}
+	if err := loadLayer(0, embedded, "catalog", func(n string) string { return n }); err != nil {
+		return nil, err
+	}
+	for i, dir := range overrideDirs {
+		if _, err := os.Stat(dir); errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		label := func(n string) string { return filepath.Join(dir, filepath.FromSlash(n)) }
+		if err := loadLayer(i+1, os.DirFS(dir), ".", label); err != nil {
+			return nil, err
+		}
+	}
+
+	// Unknown categories sort last; Lint reports them.
+	rank := func(e *Entry) int {
+		i := slices.IndexFunc(Categories, func(cat Category) bool { return cat.ID == e.Category })
+		if i < 0 {
+			return len(Categories)
+		}
+		return i
+	}
+	slices.SortStableFunc(c.Entries, func(a, b *Entry) int {
+		if ra, rb := rank(a), rank(b); ra != rb {
+			return ra - rb
+		}
+		return strings.Compare(a.Name, b.Name)
+	})
+	for _, e := range c.Entries {
+		c.byID[e.ID] = e
+	}
+	if err := Lint(c); err != nil {
+		return nil, err
+	}
+	return c, nil
 }
 
 // Get returns the entry with the given ID.
@@ -207,7 +302,162 @@ func (c *Catalog) KeysFor(e *Entry) ([][]byte, error) {
 //   - every key name present in the catalog's keys, and every fingerprint
 //     40 hex digits once spaces are removed.
 func Lint(c *Catalog) error {
-	panic("catalog.Lint: not implemented (phase 1)")
+	var problems []error
+	seen := map[string]bool{}
+	for _, e := range c.Entries {
+		prefix := fmt.Sprintf("%s (%s): ", e.ID, e.Source)
+		for _, msg := range lintEntry(c, e, seen) {
+			problems = append(problems, errors.New(prefix+msg))
+		}
+		seen[e.ID] = true
+	}
+	return errors.Join(problems...)
+}
+
+var (
+	idPattern   = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+	archPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
+	fprPattern  = regexp.MustCompile(`^[0-9A-Fa-f]{40}$`)
+)
+
+// startsHTTPSOrPlaceholder reports whether a URL template begins with
+// https:// or a {name} placeholder.
+func startsHTTPSOrPlaceholder(s string) bool {
+	if strings.HasPrefix(s, "https://") {
+		return true
+	}
+	loc := placeholder.FindStringIndex(s)
+	return loc != nil && loc[0] == 0
+}
+
+// compiles reports whether regex compiles once every placeholder in it is
+// replaced with a harmless value.
+func compiles(regex string) error {
+	vars := map[string]string{}
+	for _, n := range Placeholders(regex) {
+		vars[n] = "x"
+	}
+	re, err := Render(regex, vars, regexp.QuoteMeta)
+	if err != nil {
+		return err
+	}
+	_, err = regexp.Compile(re)
+	return err
+}
+
+func lintEntry(c *Catalog, e *Entry, seen map[string]bool) []string {
+	var out []string
+	bad := func(format string, args ...any) { out = append(out, fmt.Sprintf(format, args...)) }
+
+	if !idPattern.MatchString(e.ID) {
+		bad("id must match %s", idPattern)
+	}
+	if seen[e.ID] {
+		bad("duplicate id")
+	}
+	if e.Name == "" {
+		bad("name is empty")
+	}
+	if !slices.ContainsFunc(Categories, func(cat Category) bool { return cat.ID == e.Category }) {
+		bad("unknown category %q", e.Category)
+	}
+
+	if len(e.Arch) == 0 {
+		bad("arch is empty")
+	}
+	for k, v := range e.Arch {
+		if !slices.Contains(Architectures, k) {
+			bad("unknown architecture %q", k)
+		}
+		if !archPattern.MatchString(v) {
+			bad("arch %s: token %q must match %s", k, v, archPattern)
+		}
+	}
+
+	if len(e.Steps) == 0 {
+		bad("no steps")
+	}
+	clearsigned := false
+	for i, s := range e.Steps {
+		n := i + 1
+		if !startsHTTPSOrPlaceholder(s.Fetch) {
+			bad("step %d: fetch %q must start with https:// or a placeholder", n, s.Fetch)
+		}
+		switch {
+		case s.Match != "" && s.JQ != "":
+			bad("step %d: has both match and jq", n)
+		case s.Match == "" && s.JQ == "":
+			bad("step %d: needs match or jq", n)
+		}
+		if s.Match != "" {
+			if err := compiles(s.Match); err != nil {
+				bad("step %d: match: %v", n, err)
+			}
+		}
+		if s.JQ != "" {
+			if _, err := gojq.Parse(s.JQ); err != nil {
+				bad("step %d: jq: %v", n, err)
+			}
+		}
+		if s.Exclude != "" {
+			if err := compiles(s.Exclude); err != nil {
+				bad("step %d: exclude: %v", n, err)
+			}
+		}
+		switch name, isHeader := strings.CutPrefix(s.From, FromHeaderPrefix); {
+		case s.From == "", s.From == FromBody, s.From == FromFinalURL, s.From == FromLastModified:
+		case isHeader && name != "":
+		default:
+			bad("step %d: unknown from %q", n, s.From)
+		}
+		clearsigned = clearsigned || s.Clearsigned
+	}
+
+	if e.URL == "" {
+		bad("url is empty")
+	} else if !startsHTTPSOrPlaceholder(e.URL) {
+		bad("url %q must start with https:// or a placeholder", e.URL)
+	}
+	if e.Filename != "" && !strings.Contains(e.Filename, "{version}") {
+		bad("filename %q must contain {version}", e.Filename)
+	}
+	if e.Checksum != nil {
+		if e.Checksum.Fetch == "" {
+			bad("checksum: fetch is empty")
+		}
+		if e.Checksum.Match != "" {
+			if err := compiles(e.Checksum.Match); err != nil {
+				bad("checksum: match: %v", err)
+			}
+		}
+	}
+	if e.Signature != nil {
+		if e.Signature.Type != SigDetachedChecksums && e.Signature.Type != SigDetachedISO {
+			bad("signature: unknown type %q", e.Signature.Type)
+		}
+		if e.Signature.URL == "" {
+			bad("signature: url is empty")
+		}
+	}
+
+	if signed := e.Signature != nil || clearsigned; signed {
+		if len(e.Keys) == 0 || len(e.Fingerprints) == 0 {
+			bad("a signature or clearsigned step needs both keys and fingerprints")
+		}
+	} else if len(e.Keys) > 0 || len(e.Fingerprints) > 0 {
+		bad("keys and fingerprints need a signature or a clearsigned step")
+	}
+	for _, k := range e.Keys {
+		if _, ok := c.keys[k]; !ok {
+			bad("key %q is not in keys/", k)
+		}
+	}
+	for _, f := range e.Fingerprints {
+		if !fprPattern.MatchString(strings.ReplaceAll(f, " ", "")) {
+			bad("fingerprint %q is not 40 hex digits", f)
+		}
+	}
+	return out
 }
 
 var validFilename = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+~-]*\.iso$`)
