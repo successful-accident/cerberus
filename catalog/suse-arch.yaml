@@ -1,0 +1,197 @@
+# openSUSE and Arch-family distros, Gentoo, Void and NixOS. The entry format
+# is documented in internal/catalog.
+
+- id: opensuse-tumbleweed
+  name: openSUSE Tumbleweed
+  category: diy
+  description: Rolling-release openSUSE, DVD installer with the full package set (x86_64).
+  homepage: https://get.opensuse.org/tumbleweed/
+  arch: {amd64: x86_64}
+  steps:
+    - fetch: https://download.opensuse.org/tumbleweed/iso/openSUSE-Tumbleweed-DVD-{arch}-Current.iso.sha256
+      match: '(?m)^(?P<sha256>[0-9a-f]{64})\s+\*?(?P<file>openSUSE-Tumbleweed-DVD-{arch}-Snapshot(?P<version>\d{8})-Media\.iso)$'
+  url: https://download.opensuse.org/tumbleweed/iso/{file}
+  notes: >-
+    Checksum-only. The -Current.iso.sha256 file redirects to the newest
+    Snapshot file, and the version is the snapshot date. The Snapshot
+    .sha256.asc is signed by the openSUSE Project Signing Key
+    (AD485664E901B867051AB15F35A2F86E29B700A4, listed on
+    https://get.opensuse.org/tumbleweed/), but as an old-format version 3
+    OpenPGP signature that go-crypto skips silently, so internal/verify sees
+    "no signatures found". Add signature, keys and fingerprints (key at
+    https://download.opensuse.org/tumbleweed/repo/oss/gpg-pubkey-29b700a4-6a17fa38.asc)
+    once the verifier reads v3 signatures. Leap's v4 signatures already work.
+
+- id: opensuse-tumbleweed-arm64
+  name: openSUSE Tumbleweed (arm64)
+  category: diy
+  description: Rolling-release openSUSE, DVD installer with the full package set (aarch64).
+  homepage: https://get.opensuse.org/tumbleweed/
+  arch: {arm64: aarch64}
+  steps:
+    - fetch: https://download.opensuse.org/ports/aarch64/tumbleweed/iso/openSUSE-Tumbleweed-DVD-{arch}-Current.iso.sha256
+      match: '(?m)^(?P<sha256>[0-9a-f]{64})\s+\*?(?P<file>openSUSE-Tumbleweed-DVD-{arch}-Snapshot(?P<version>\d{8})-Media\.iso)$'
+  url: https://download.opensuse.org/ports/aarch64/tumbleweed/iso/{file}
+  notes: >-
+    Checksum-only, for the same reason as opensuse-tumbleweed (version 3
+    signatures). The aarch64 ISOs live under ports/, so arm64 has its own
+    entry, and its snapshot can lag the x86_64 one by a day.
+
+- id: opensuse-leap
+  name: openSUSE Leap
+  category: desktop
+  description: Stable openSUSE with a long support cycle, offline installer with the full package set.
+  homepage: https://get.opensuse.org/leap/
+  arch: {amd64: x86_64, arm64: aarch64}
+  steps:
+    - fetch: https://download.opensuse.org/distribution/leap/
+      match: 'href="\./(?P<version>(?:1[6-9]|[2-9]\d)\.\d+)/"'
+    - fetch: https://download.opensuse.org/distribution/leap/{version}/offline/Leap-{version}-offline-installer-{arch}.install.iso.sha512
+      match: '(?m)^(?P<sha512>[0-9a-f]{128})\s+\*?(?P<file>Leap-{version}-offline-installer-{arch}\.install\.iso)$'
+  url: https://download.opensuse.org/distribution/leap/{version}/offline/{file}
+  signature: {type: detached-checksums, url: 'https://download.opensuse.org/distribution/leap/{version}/offline/{file}.sha512.asc'}
+  keys: [opensuse-signing]
+  fingerprints: [AD485664E901B867051AB15F35A2F86E29B700A4]
+  notes: >-
+    The .sha512.asc files are signed by key
+    AD485664E901B867051AB15F35A2F86E29B700A4 (openSUSE Project Signing Key),
+    the same key as Tumbleweed. Key downloaded from
+    https://download.opensuse.org/tumbleweed/repo/oss/gpg-pubkey-29b700a4-6a17fa38.asc
+    and its fingerprint confirmed on https://get.opensuse.org/tumbleweed/. The
+    pattern covers Leap 16 and later; Leap 15 used a different layout.
+
+- id: archlinux
+  name: Arch Linux
+  category: diy
+  description: The rolling-release distro that ships a fresh installer ISO on the first of each month.
+  homepage: https://archlinux.org/download/
+  arch: {amd64: x86_64}
+  steps:
+    - fetch: https://archlinux.org/releng/releases/json/
+      jq: '.releases[] | select(.available == true) | {version, sha256: .sha256_sum, file: (.iso_url | split("/") | last)}'
+  url: https://fastly.mirror.pkgbuild.com/iso/{version}/{file}
+  signature: {type: detached-iso, url: '{url}.sig'}
+  keys: [archlinux-releng]
+  fingerprints: [3E80CA1A8B89F69CBA57D98A76A5EF9054449A5C]
+  notes: >-
+    The checksum comes from the releng releases JSON on archlinux.org, which
+    also names the signer (pgp_fingerprint 3E80CA1A8B89F69CBA57D98A76A5EF9054449A5C,
+    Pierre Schmitz, the same for every release since 2025.12). Key downloaded
+    from archlinux.org's WKD,
+    https://openpgpkey.archlinux.org/.well-known/openpgpkey/archlinux.org/hu/9hy3wi4ewwiicomnjmhewifn6d1gi87i?l=pierre
+    (the file also held an old RSA key and a duplicate, which were dropped),
+    and its fingerprint confirmed on https://archlinux.org/download/ and in
+    https://archlinux.org/releng/releases/json/. fastly.mirror.pkgbuild.com is
+    one of the mirrors listed on the download page. Arch publishes no arm64 ISO.
+
+- id: endeavouros
+  name: EndeavourOS
+  category: desktop
+  description: Arch-based distro with a friendly installer and close-to-Arch defaults.
+  homepage: https://endeavouros.com/
+  arch: {amd64: x86_64}
+  steps:
+    - fetch: https://mirror.alpix.eu/endeavouros/iso/
+      match: 'href="(?P<file>EndeavourOS_[A-Za-z]+(?:[_-][A-Za-z]+)*-(?P<version>\d{4}\.\d{2}\.\d{2})\.iso)"'
+    - fetch: https://mirror.alpix.eu/endeavouros/iso/{file}.sha512sum
+      match: '(?m)^(?P<sha512>[0-9a-f]{128})\s+\*?{file}$'
+  url: https://mirror.alpix.eu/endeavouros/iso/{file}
+  signature: {type: detached-iso, url: '{url}.sig'}
+  keys: [endeavouros-iso]
+  fingerprints: [8F43FC374CD4CEEA19CEE323E3D8752ACDF595A1]
+  notes: >-
+    Releases carry a codename, such as Titan-Nova-2026.08.15, so the match
+    takes the ISOs with a dotted date and sorts by it. Key 8F43FC374CD4CEEA19CEE323E3D8752ACDF595A1
+    (Johannes Kamprad) downloaded from
+    https://keyserver.ubuntu.com/pks/lookup?op=get&options=mr&search=0x8F43FC374CD4CEEA19CEE323E3D8752ACDF595A1
+    and its fingerprint confirmed on https://endeavouros.com/download/, which
+    lists mirror.alpix.eu among the official mirrors. The ARM images aren't
+    ISOs, so there's no arm64 entry.
+
+- id: cachyos
+  name: CachyOS Desktop
+  category: desktop
+  description: Arch-based desktop distro with performance-tuned kernels and packages.
+  homepage: https://cachyos.org/
+  arch: {amd64: x86_64}
+  steps:
+    - fetch: https://mirror.cachyos.org/ISO/desktop/
+      match: 'href="(?P<version>\d{6})/"'
+    - fetch: https://mirror.cachyos.org/ISO/desktop/{version}/cachyos-desktop-linux-{version}.iso.sha256
+      match: '(?m)^(?P<sha256>[0-9a-f]{64})\s+\*?(?P<file>cachyos-desktop-linux-{version}\.iso)$'
+  url: https://mirror.cachyos.org/ISO/desktop/{version}/{file}
+  signature: {type: detached-iso, url: '{url}.sig'}
+  keys: [cachyos-iso]
+  fingerprints: [882DCFE48E2051D48E2562ABF3B607488DB35A47]
+  notes: >-
+    The version is the YYMMDD build date. Key 882DCFE48E2051D48E2562ABF3B607488DB35A47
+    (CachyOS <admin@cachyos.org>) downloaded from
+    https://keyserver.ubuntu.com/pks/lookup?op=get&options=mr&search=0x882DCFE48E2051D48E2562ABF3B607488DB35A47
+    and its fingerprint confirmed on https://wiki.cachyos.org/cachyos_basic/download/.
+    The wiki also gives the key ID F3B607488DB35A47 for the repository key.
+    The key's encryption subkey expired in 2023, but the primary signing key
+    doesn't expire.
+
+- id: gentoo-minimal
+  name: Gentoo Minimal Installation CD
+  category: diy
+  description: Gentoo's small installer image, the starting point for a source-based install.
+  homepage: https://www.gentoo.org/downloads/
+  arch: {amd64: amd64, arm64: arm64}
+  steps:
+    - fetch: https://distfiles.gentoo.org/releases/{arch}/autobuilds/latest-install-{arch}-minimal.txt
+      clearsigned: true
+      match: '(?m)^(?P<path>(?P<version>\d{8}T\d{6}Z)/install-{arch}-minimal-\d{8}T\d{6}Z\.iso) \d+$'
+    - fetch: https://distfiles.gentoo.org/releases/{arch}/autobuilds/{path}.sha256
+      clearsigned: true
+      match: '(?m)^(?P<sha256>[0-9a-f]{64})\s+\*?(?P<file>install-{arch}-minimal-{version}\.iso)$'
+  url: https://distfiles.gentoo.org/releases/{arch}/autobuilds/{path}
+  filename: gentoo-install-minimal-{arch}-{version}.iso
+  keys: [gentoo-release]
+  fingerprints: [13EBBDBEDE7A12775DFDB1BABB572E0E2D182910]
+  notes: >-
+    Both the latest-install file and the ISO's .sha256 are clearsigned by a
+    signing subkey (534E4209AB49EEE1C19D96162C44695DB9F6043D) of the Gentoo
+    Linux Release Engineering (Automated Weekly Release Key), primary
+    fingerprint 13EBBDBEDE7A12775DFDB1BABB572E0E2D182910. Key downloaded from
+    https://keyserver.ubuntu.com/pks/lookup?op=get&options=mr&search=0x13EBBDBEDE7A12775DFDB1BABB572E0E2D182910
+    and the primary fingerprint confirmed on
+    https://www.gentoo.org/downloads/signatures/. The version is the build
+    timestamp, and the file gets a Gentoo name because upstream's
+    install-amd64-minimal-* says little in a mixed library.
+
+- id: void-xfce
+  name: Void Linux (XFCE)
+  category: lightweight
+  description: Independent rolling distro with runit, live ISO with the XFCE desktop (glibc).
+  homepage: https://voidlinux.org/download/
+  arch: {amd64: x86_64, arm64: aarch64}
+  steps:
+    - fetch: https://repo-default.voidlinux.org/live/current/sha256sum.txt
+      match: '(?m)^SHA256 \((?P<file>void-live-{arch}-(?P<version>\d{8})-xfce\.iso)\) = (?P<sha256>[0-9a-f]{64})$'
+  url: https://repo-default.voidlinux.org/live/current/{file}
+  notes: >-
+    Checksum-only. Void signs sha256sum.txt with signify (sha256sum.sig), not
+    OpenPGP, and internal/verify reads only OpenPGP, so there's no signature
+    to pin. The glibc build is selected by the file name; the musl images
+    carry "-musl-" and don't match.
+
+- id: nixos-minimal
+  name: NixOS Minimal
+  category: diy
+  description: Declarative Linux, minimal installer ISO from the current stable channel.
+  homepage: https://nixos.org/download/
+  arch: {amd64: x86_64, arm64: aarch64}
+  steps:
+    - fetch: https://nix-releases.s3.amazonaws.com/?delimiter=/&prefix=nixos/
+      match: '<Prefix>nixos/(?P<version>(?P<channel>\d{2}\.\d{2}))/</Prefix>'
+    - fetch: https://channels.nixos.org/nixos-{channel}/latest-nixos-minimal-{arch}-linux.iso.sha256
+      match: '(?m)^(?P<sha256>[0-9a-f]{64})\s+(?P<file>nixos-minimal-(?P<version>\d+\.\d+\.\d+\.[0-9a-f]+)-{arch}-linux\.iso)$'
+  url: https://releases.nixos.org/nixos/{channel}/nixos-{version}/{file}
+  notes: >-
+    Checksum-only: NixOS publishes only a sha256 beside each ISO, with no
+    OpenPGP signature. The first step lists the release channels (NN.MM, not
+    the -small or unstable ones) in the nix-releases bucket. The newest can
+    appear before it has an ISO, in which case the resolver falls back to the
+    previous channel. The sha256 URL on channels.nixos.org redirects to the
+    immutable file under releases.nixos.org.

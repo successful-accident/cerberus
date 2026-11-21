@@ -1,0 +1,145 @@
+# Homelab hypervisors, storage and cluster OSes. The entry format is documented in internal/catalog.
+
+- id: proxmox-ve
+  name: Proxmox VE
+  category: homelab
+  description: Debian-based virtualization platform with KVM, LXC, ZFS and Ceph behind a web UI.
+  homepage: https://www.proxmox.com/en/products/proxmox-virtual-environment/overview
+  # The arch token is the file name's tail after the version. Proxmox ships the amd64 ISO as
+  # proxmox-ve_<ver>.iso and the arm64 ISO as proxmox-ve_<ver>-arm64.iso.
+  arch: {amd64: .iso, arm64: -arm64.iso}
+  steps:
+    - fetch: https://enterprise.proxmox.com/iso/SHA256SUMS
+      match: '(?m)^(?P<sha256>[0-9a-f]{64}) [ *](?P<file>proxmox-ve_(?P<version>\d+\.\d+-\d+){arch})$'
+  url: https://enterprise.proxmox.com/iso/{file}
+  signature: {type: detached-checksums, url: https://enterprise.proxmox.com/iso/SHA256SUMS.asc}
+  keys: [proxmox-release]
+  fingerprints:
+    - 24B30F06ECC1836A4E5EFECBA7BCD1420BFE778E
+    - F4E136C67CDCE41AE6DE6FC81140AF8F639E0C39
+  notes: >-
+    SHA256SUMS.asc holds two detached signatures, one from the Proxmox Trixie Release Key (24B3 0F06 ...) and one
+    from the Proxmox Bookworm Release Key (F4E1 36C6 ...); either passes. The key file is the keyring from
+    https://enterprise.proxmox.com/debian/proxmox-archive-keyring-trixie.gpg. Its sha256
+    (136673be77aba35dcce385b28737689ad64fd785a797e57897589aed08db6e45) matches the value that the official page
+    https://pve.proxmox.com/wiki/Package_Repositories prints for that keyring. That page gives a checksum, not a
+    fingerprint, so the fingerprints are those of the two keys in the verified file. The SHA256SUMS file lists
+    old major versions and other Proxmox products too; the version match picks the newest proxmox-ve file.
+
+- id: proxmox-backup-server
+  name: Proxmox Backup Server
+  category: homelab
+  description: Deduplicating, encrypted backup server for Proxmox VE, VMs, containers and hosts.
+  homepage: https://www.proxmox.com/en/products/proxmox-backup-server/overview
+  arch: {amd64: amd64}
+  steps:
+    - fetch: https://enterprise.proxmox.com/iso/SHA256SUMS
+      match: '(?m)^(?P<sha256>[0-9a-f]{64}) [ *](?P<file>proxmox-backup-server_(?P<version>\d+\.\d+-\d+)\.iso)$'
+  url: https://enterprise.proxmox.com/iso/{file}
+  signature: {type: detached-checksums, url: https://enterprise.proxmox.com/iso/SHA256SUMS.asc}
+  keys: [proxmox-release]
+  fingerprints:
+    - 24B30F06ECC1836A4E5EFECBA7BCD1420BFE778E
+    - F4E136C67CDCE41AE6DE6FC81140AF8F639E0C39
+  notes: >-
+    SHA256SUMS.asc holds two detached signatures, one from the Proxmox Trixie Release Key (24B3 0F06 ...) and one
+    from the Proxmox Bookworm Release Key (F4E1 36C6 ...); either passes. The key file is the keyring from
+    https://enterprise.proxmox.com/debian/proxmox-archive-keyring-trixie.gpg. Its sha256
+    (136673be77aba35dcce385b28737689ad64fd785a797e57897589aed08db6e45) matches the value that the official page
+    https://pve.proxmox.com/wiki/Package_Repositories prints for that keyring. That page gives a checksum, not a
+    fingerprint, so the fingerprints are those of the two keys in the verified file.
+
+- id: xcp-ng
+  name: XCP-ng
+  category: homelab
+  description: Open-source Xen hypervisor distribution, managed with Xen Orchestra.
+  homepage: https://xcp-ng.org/
+  arch: {amd64: x86_64}
+  steps:
+    - fetch: https://updates.xcp-ng.org/isos/
+      match: 'href="(?P<version>(?P<dir>\d+\.\d+))/"'
+    - fetch: https://updates.xcp-ng.org/isos/{dir}/SHA256SUMS
+      match: '(?m)^(?P<sha256>[0-9a-f]{64}) [ *](?P<file>xcp-ng-(?P<version>\d+\.\d+\.\d+-\d{8}(?:\.\d+)?)\.iso)$'
+  url: https://updates.xcp-ng.org/isos/{dir}/{file}
+  notes: >-
+    Unsigned on purpose: the checksum comes over HTTPS from the project's own host. XCP-ng does sign SHA256SUMS
+    (SHA256SUMS.asc, XCP-ng Official Signing Key 34AC 2EB6 8248 FED6 D076 838A CD75 783A 3FD3 AC9E, published at
+    https://xcp-ng.org/RPM-GPG-KEY-xcpng and listed at https://docs.xcp-ng.org/project/mirrors/), but the
+    signature uses SHA-1, which cerberus rejects. Add the signature once upstream re-signs with SHA-256 or
+    better. The newest release folder is picked from the /isos/ listing. The ISO file names carry a build date,
+    such as 8.3.0-20260806, and the regex skips the netinstall ISO.
+
+- id: truenas
+  name: TrueNAS Community Edition
+  category: homelab
+  description: Debian-based NAS operating system with ZFS, apps, VMs and a web UI. Formerly TrueNAS SCALE.
+  homepage: https://www.truenas.com/truenas-community-edition/
+  arch: {amd64: amd64}
+  steps:
+    # The download host lists every train and release on one page. Only stable trains match: TrueNAS-SCALE-<Codename>,
+    # TrueNAS-<Codename> and TrueNAS-<NN>. Trains with a suffix (-BETA, -RC, -Nightlies) fail the "/" after the name.
+    - fetch: https://download.truenas.com/
+      match: 'href="(?P<train>TrueNAS-(?:SCALE-)?(?:[A-Za-z]+|\d+))/(?P<version>\d+(?:\.\d+)+)/(?P<file>TrueNAS-(?:SCALE-)?\d+(?:\.\d+)+\.iso)"'
+      exclude: '(?i)alpha|beta|-rc|master|nightl|internal'
+  url: https://download.truenas.com/{train}/{version}/{file}
+  checksum: {fetch: '{url}.sha256'}
+  signature: {type: detached-iso, url: '{url}.gpg'}
+  keys: [truenas-release]
+  fingerprints:
+    - C8D62DEF767C1DB0DFF4E6EC358EAA9112CF7946
+  notes: >-
+    The ISO has a bare .sha256 file and a binary detached .iso.gpg signature by the "IX SecTeam" key. The key is
+    from keyserver.ubuntu.com, fetched by the full fingerprint. The fingerprint C8D6 2DEF 767C 1DB0 DFF4 E6EC 358E
+    AA91 12CF 7946 is printed as the PGP public key on https://www.truenas.com/download-tn-core and in the
+    install guide https://www.truenas.com/docs/scale/27/gettingstarted/install/installingscale/. The key expires
+    2027-09-29, so refresh the key file before then. Train names are moving from TrueNAS-SCALE-<Codename> to
+    TrueNAS-<NN> (26 and 27 are still BETA and RC), and the match accepts both forms, so it should pick up the
+    first stable TrueNAS-<NN> release without a catalog change. The page is large, about 11 MB, because it
+    lists every file.
+
+- id: openmediavault
+  name: openmediavault
+  category: homelab
+  description: Debian-based NAS operating system with a web UI, plugins and Docker support.
+  homepage: https://www.openmediavault.org/
+  arch: {amd64: amd64}
+  steps:
+    # SourceForge's best_release.json carries only an md5, so this reads the project's file feed instead and
+    # takes the highest version.
+    - fetch: https://sourceforge.net/projects/openmediavault/rss?path=/iso
+      match: 'files/iso/(?P<version>\d+(?:\.\d+)+)/(?P<file>openmediavault_(?:\d+(?:\.\d+)+)-{arch}\.iso)/download'
+  url: https://sourceforge.net/projects/openmediavault/files/iso/{version}/{file}/download
+  filename: openmediavault_{version}-{arch}.iso
+  checksum: {fetch: 'https://sourceforge.net/projects/openmediavault/files/iso/{version}/{file}.sha256/download'}
+  signature: {type: detached-iso, url: 'https://sourceforge.net/projects/openmediavault/files/iso/{version}/{file}.asc/download'}
+  keys: [openmediavault-iso]
+  fingerprints:
+    - D67506C878E08A94FD7E009424863F0C716B980B
+  notes: >-
+    Each release folder on SourceForge holds the ISO, a .sha256 file, a detached .asc signature and the public key
+    (.key). The key file is that .key file. Its fingerprint, D675 06C8 78E0 8A94 FD7E 0094 2486 3F0C 716B 980B,
+    is printed under "The ISO images are signed with" on https://www.openmediavault.org/download.html, which also
+    prints the sha256 of the current stable ISO. The feed lists old major versions too, so the resolver's
+    version sort picks the newest.
+
+- id: talos
+  name: Talos Linux
+  category: containers
+  description: Minimal, immutable, API-managed Linux for running Kubernetes. The vanilla metal ISO.
+  homepage: https://www.talos.dev/
+  arch: {amd64: amd64, arm64: arm64}
+  steps:
+    # Stable releases only: the tag must be plain vX.Y.Z, and prereleases are dropped. The release feed also lists
+    # patch releases of older branches, so the resolver's version sort picks the highest.
+    - fetch: https://api.github.com/repos/siderolabs/talos/releases?per_page=50
+      jq: '.[] | select((.prerelease | not) and (.tag_name | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))) | .tag_name as $t | .assets[] | select(.name == ("metal-" + $arch + ".iso") and .digest != null) | {version: ($t | ltrimstr("v")), dl: .browser_download_url, sha256: (.digest | ltrimstr("sha256:"))}'
+  url: '{dl}'
+  filename: talos-{version}-metal-{arch}.iso
+  notes: >-
+    Hosted on GitHub, so this entry is checked by the weekly CI job (check: ci-only), not from the cloud sandbox.
+    Image Factory (https://factory.talos.dev) serves the same vanilla ISO but gives no checksum: its .sha256
+    endpoint answers "enterprise not enabled". So the entry reads the GitHub release feed instead. The ISO is
+    the release asset metal-<arch>.iso, and the sha256 is the digest GitHub records for the asset at upload.
+    Talos publishes no OpenPGP signature for the ISO, so the entry is unsigned. The file name gets the version
+    because the upstream name is the same for every release. Written from GitHub's documented release JSON and
+    not run against the live API.

@@ -1,0 +1,168 @@
+# Fedora, Rocky, AlmaLinux, CentOS Stream and Bazzite. The entry format is documented in internal/catalog.
+
+- id: fedora-workstation
+  name: Fedora Workstation
+  category: desktop
+  description: Fedora's GNOME desktop live ISO, with current upstream software.
+  homepage: https://fedoraproject.org/workstation/
+  arch: {amd64: x86_64, arm64: aarch64}
+  steps:
+    - fetch: https://fedoraproject.org/releases.json
+      jq: '.[] | select(.variant == "Workstation" and .arch == $arch and (.link | endswith(".iso"))) | (.link | capture("-(?<v>[0-9]+)-(?<c>[0-9]+\\.[0-9]+)\\.")) as $m | {version, file: (.link | split("/") | last), dir: (.link | sub("[^/]*$"; "")), cks: ("Fedora-Workstation-" + $m.v + "-" + $m.c + "-" + $arch + "-CHECKSUM")}'
+      exclude: '(?i)beta|_rc|/test/'
+    - fetch: '{dir}{cks}'
+      clearsigned: true
+      match: '(?m)^SHA256 \({file}\) = (?P<sha256>[0-9a-f]{64})$'
+  url: '{dir}{file}'
+  keys: [fedora-release]
+  fingerprints:
+    - 36F612DCF27F7D1A48A835E4DBFCF71C6D9F90A6
+    - 4F50A6114CD5C6976A7F1179655A4B02F577861E
+    - D924B10D3E810DABDD8B56B596E7E91491211FCE
+  notes: >-
+    The CHECKSUM files are clearsigned with the Fedora release key. The key file holds the Fedora 44, 45 and 46
+    keys, extracted by fingerprint from https://fedoraproject.org/fedora.gpg. The fingerprints are from
+    https://fedoraproject.org/security/ (Fedora 44, Fedora 45, and the key listed there as Fedora Rawhide, whose
+    user ID is Fedora (46)).
+
+- id: fedora-kde
+  name: Fedora KDE Plasma
+  category: desktop
+  description: Fedora's KDE Plasma desktop live ISO.
+  homepage: https://fedoraproject.org/kde/
+  arch: {amd64: x86_64, arm64: aarch64}
+  steps:
+    - fetch: https://fedoraproject.org/releases.json
+      jq: '.[] | select(.variant == "KDE" and .subvariant == "KDE" and .arch == $arch and (.link | endswith(".iso"))) | (.link | capture("-(?<v>[0-9]+)-(?<c>[0-9]+\\.[0-9]+)\\.")) as $m | {version, file: (.link | split("/") | last), dir: (.link | sub("[^/]*$"; "")), cks: ("Fedora-KDE-" + $m.v + "-" + $m.c + "-" + $arch + "-CHECKSUM")}'
+      exclude: '(?i)beta|_rc|/test/'
+    - fetch: '{dir}{cks}'
+      clearsigned: true
+      match: '(?m)^SHA256 \({file}\) = (?P<sha256>[0-9a-f]{64})$'
+  url: '{dir}{file}'
+  keys: [fedora-release]
+  fingerprints:
+    - 36F612DCF27F7D1A48A835E4DBFCF71C6D9F90A6
+    - 4F50A6114CD5C6976A7F1179655A4B02F577861E
+    - D924B10D3E810DABDD8B56B596E7E91491211FCE
+  notes: >-
+    The CHECKSUM files are clearsigned with the Fedora release key. The key file holds the Fedora 44, 45 and 46
+    keys, extracted by fingerprint from https://fedoraproject.org/fedora.gpg. The fingerprints are from
+    https://fedoraproject.org/security/ (Fedora 44, Fedora 45, and the key listed there as Fedora Rawhide, whose
+    user ID is Fedora (46)).
+
+- id: fedora-server
+  name: Fedora Server (DVD)
+  category: server
+  description: Fedora Server offline installer DVD.
+  homepage: https://fedoraproject.org/server/
+  arch: {amd64: x86_64, arm64: aarch64}
+  steps:
+    - fetch: https://fedoraproject.org/releases.json
+      jq: '.[] | select(.variant == "Server" and .arch == $arch and (.link | test("-dvd-.*\\.iso$"))) | (.link | capture("-(?<v>[0-9]+)-(?<c>[0-9]+\\.[0-9]+)\\.")) as $m | {version, file: (.link | split("/") | last), dir: (.link | sub("[^/]*$"; "")), cks: ("Fedora-Server-" + $m.v + "-" + $m.c + "-" + $arch + "-CHECKSUM")}'
+      exclude: '(?i)beta|_rc|/test/'
+    - fetch: '{dir}{cks}'
+      clearsigned: true
+      match: '(?m)^SHA256 \({file}\) = (?P<sha256>[0-9a-f]{64})$'
+  url: '{dir}{file}'
+  keys: [fedora-release]
+  fingerprints:
+    - 36F612DCF27F7D1A48A835E4DBFCF71C6D9F90A6
+    - 4F50A6114CD5C6976A7F1179655A4B02F577861E
+    - D924B10D3E810DABDD8B56B596E7E91491211FCE
+  notes: >-
+    The CHECKSUM files are clearsigned with the Fedora release key. The key file holds the Fedora 44, 45 and 46
+    keys, extracted by fingerprint from https://fedoraproject.org/fedora.gpg. The fingerprints are from
+    https://fedoraproject.org/security/ (Fedora 44, Fedora 45, and the key listed there as Fedora Rawhide, whose
+    user ID is Fedora (46)).
+
+- id: fedora-coreos
+  name: Fedora CoreOS (stable)
+  category: containers
+  description: Minimal, auto-updating container host. The live ISO installs it with an Ignition config.
+  homepage: https://fedoraproject.org/coreos/
+  arch: {amd64: x86_64, arm64: aarch64}
+  steps:
+    - fetch: https://builds.coreos.fedoraproject.org/streams/stable.json
+      jq: '.architectures[$arch].artifacts.metal as $m | {version: $m.release, iso: $m.formats.iso.disk.location, sha256: $m.formats.iso.disk.sha256}'
+  url: '{iso}'
+  signature: {type: detached-iso, url: '{url}.sig'}
+  keys: [fedora-release]
+  fingerprints:
+    - 36F612DCF27F7D1A48A835E4DBFCF71C6D9F90A6
+    - 4F50A6114CD5C6976A7F1179655A4B02F577861E
+    - D924B10D3E810DABDD8B56B596E7E91491211FCE
+  notes: >-
+    The stream's .iso.sig is a detached signature over the ISO, made with the Fedora 45 key (checked against the
+    signature's issuer fingerprint). The key file holds the Fedora 44, 45 and 46 keys, extracted by fingerprint
+    from https://fedoraproject.org/fedora.gpg. The fingerprints are from https://fedoraproject.org/security/
+    (Fedora 44, Fedora 45, and the key listed there as Fedora Rawhide, whose user ID is Fedora (46)).
+
+- id: rocky-minimal
+  name: Rocky Linux 10 minimal
+  category: server
+  description: Rocky Linux 10 minimal installer, a free rebuild of Red Hat Enterprise Linux.
+  homepage: https://rockylinux.org/download
+  arch: {amd64: x86_64, arm64: aarch64}
+  steps:
+    - fetch: https://download.rockylinux.org/pub/rocky/10/isos/{arch}/CHECKSUM
+      match: '(?m)^SHA256 \((?P<file>Rocky-(?P<version>\d+\.\d+)-{arch}-minimal\.iso)\) = (?P<sha256>[0-9a-f]{64})$'
+  url: https://download.rockylinux.org/pub/rocky/10/isos/{arch}/{file}
+  signature: {type: detached-checksums, url: 'https://download.rockylinux.org/pub/rocky/10/isos/{arch}/CHECKSUM.asc'}
+  keys: [rocky-release]
+  fingerprints:
+    - FC226859C0860BF0DDB95B085B106C736FEDFC85
+  notes: >-
+    CHECKSUM.asc is a detached signature over CHECKSUM, made by the Rocky Linux 10 release key. The key is
+    https://download.rockylinux.org/pub/rocky/RPM-GPG-KEY-Rocky-10, and its fingerprint is confirmed at
+    https://rockylinux.org/keys/ (Rocky Linux 10 Release Keys).
+
+- id: almalinux-minimal
+  name: AlmaLinux 10 minimal
+  category: server
+  description: AlmaLinux 10 minimal installer, a binary-compatible rebuild of Red Hat Enterprise Linux.
+  homepage: https://almalinux.org/get-almalinux/
+  arch: {amd64: x86_64, arm64: aarch64}
+  steps:
+    - fetch: https://repo.almalinux.org/almalinux/10/isos/{arch}/CHECKSUM
+      clearsigned: true
+      match: '(?m)^SHA256 \((?P<file>AlmaLinux-(?P<version>\d+\.\d+)-{arch}-minimal\.iso)\) = (?P<sha256>[0-9a-f]{64})$'
+  url: https://repo.almalinux.org/almalinux/10/isos/{arch}/{file}
+  keys: [almalinux-release]
+  fingerprints:
+    - EE6DB7B98F5BF5EDD9DA0DE5DEE5C11CC2A1E572
+  notes: >-
+    The CHECKSUM file is clearsigned with the AlmaLinux OS 10 key. The key is
+    https://repo.almalinux.org/almalinux/RPM-GPG-KEY-AlmaLinux-10, and its fingerprint is confirmed at
+    https://almalinux.org/security/ (GPG keys, AlmaLinux OS 10).
+
+- id: centos-stream-boot
+  name: CentOS Stream 10 boot
+  category: server
+  description: CentOS Stream 10 network installer, the upstream of the next RHEL minor release.
+  homepage: https://www.centos.org/centos-stream/
+  arch: {amd64: x86_64, arm64: aarch64}
+  steps:
+    - fetch: https://mirror.stream.centos.org/10-stream/BaseOS/{arch}/iso/SHA256SUM
+      match: '(?m)^SHA256 \((?P<file>CentOS-Stream-10-(?P<version>\d{8}\.\d+)-{arch}-boot\.iso)\) = (?P<sha256>[0-9a-f]{64})$'
+  url: https://mirror.stream.centos.org/10-stream/BaseOS/{arch}/iso/{file}
+  notes: >-
+    Unsigned. The mirror publishes no signature for its SHA256SUM files (no .asc or .sig beside them, and the
+    files are not clearsigned), so the checksum comes over HTTPS only. The dated file name is the stable one;
+    the CentOS-Stream-10-latest alias is skipped because its name has no version.
+
+- id: bazzite
+  name: Bazzite
+  category: gaming
+  description: Fedora Atomic desktop for gaming, with Steam and the Proton tooling preinstalled.
+  homepage: https://bazzite.gg/
+  arch: {amd64: amd64}
+  steps:
+    - fetch: https://download.bazzite.gg/bazzite-stable-{arch}.iso
+      from: last-modified
+      match: '(?P<version>\d{8}T\d{6}Z)'
+  url: https://download.bazzite.gg/bazzite-stable-{arch}.iso
+  filename: bazzite-stable-{version}-{arch}.iso
+  checksum: {fetch: 'https://download.bazzite.gg/bazzite-stable-{arch}.iso-CHECKSUM'}
+  notes: >-
+    Unsigned. The upstream file name is fixed, so the version is the ISO's Last-Modified time. There is no
+    arm64 ISO (the download host returns 404 for it).
