@@ -144,21 +144,30 @@ then removed from the old folder.
 
 ## The catalog
 
-About 40 distros in nine groups. This is the list as planned. Any entry that
-can't be checked reliably is dropped before v0.1, and `cerberus catalog`
-always prints the current list.
+About 40 distros in nine groups, as 45 catalog entries. A few distros have
+a separate arm64 entry, because they publish it on a different host.
+`cerberus catalog` prints the current list.
 
 | Use case | Distros |
 |---|---|
-| Desktop | Ubuntu, Kubuntu, Fedora Workstation and KDE, Linux Mint, Pop!_OS, Debian Live, openSUSE Tumbleweed |
-| Gaming | Bazzite, CachyOS |
-| Server | Ubuntu Server, Debian netinst, Rocky Linux, AlmaLinux, CentOS Stream, Fedora Server, openSUSE Leap |
-| Homelab | Proxmox VE, Proxmox Backup Server, XCP-ng, TrueNAS, openmediavault |
+| Desktop | Ubuntu Desktop LTS, Kubuntu LTS, Fedora Workstation, Fedora KDE Plasma, Linux Mint Cinnamon, Pop!_OS, Debian Live (GNOME), openSUSE Leap, CachyOS, EndeavourOS |
+| Gaming | Bazzite |
+| Server | Ubuntu Server LTS, Debian netinst, Rocky Linux 10, AlmaLinux 10, CentOS Stream 10, Fedora Server |
+| Homelab | Proxmox VE, Proxmox Backup Server, XCP-ng, TrueNAS Community Edition, openmediavault |
 | Containers | Talos Linux, Fedora CoreOS |
 | Security and privacy | Kali Linux, Parrot Security, Tails, Qubes OS |
-| Rescue | SystemRescue, GParted Live, Clonezilla, Rescuezilla, netboot.xyz, ShredOS |
-| Lightweight | Alpine Linux, MX Linux |
-| DIY and rolling | Arch Linux, Gentoo, Void Linux, NixOS, EndeavourOS |
+| Rescue | SystemRescue, GParted Live, Clonezilla Live, Rescuezilla, netboot.xyz, ShredOS |
+| Lightweight | Alpine Linux (standard and virt), MX Linux, Void Linux |
+| DIY and rolling | Arch Linux, Gentoo, NixOS, openSUSE Tumbleweed |
+
+Every ISO is checked against its distro's published checksum. Most entries
+also verify the distro's OpenPGP signature. The exceptions:
+- Pop!_OS, CentOS Stream, Bazzite, Talos, Rescuezilla, ShredOS,
+  netboot.xyz, Void and NixOS publish no OpenPGP signature.
+- XCP-ng signs with SHA-1, which cerberus rejects.
+- openSUSE Tumbleweed uses version 3 signatures, which cerberus doesn't read
+  yet.
+- MX Linux's signing key isn't listed anywhere official.
 
 Each entry is a short recipe in [`catalog/`](./catalog), and you can add
 your own ([Add a distro](#add-a-distro)).

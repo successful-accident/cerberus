@@ -1,6 +1,11 @@
 # cerberus build plan
 
-**Status (2026-11-21):** phases 0 to 3 are done. Next is phase 4, the real run.
+**Status (2026-11-21):** phases 0 to 5 are done. Next is phase 6, the independent review.
+- **Phase 4:** the real binary downloaded Alpine virt and Debian netinst from live mirrors. Both were verified: Alpine's ISO signature and Debian's signed SHA512SUMS. The status screen was right, a second sync downloaded nothing, and `location set` moved both by rename and rebuilt `latest/`.
+  - The units pass `systemd-analyze verify`.
+  - CI, the weekly catalog check and release workflows run on GitHub.
+  - The first live catalog run on GitHub caught a transient Proxmox 503, now retried, and a ShredOS version bug, now fixed.
+- **Phase 5:** the README's catalog table and its signature exceptions match `cerberus catalog`, and every command shown exists. The status mock's schedule line matches the real format. The pre-release note stays until v0.1 is tagged, which is the owner's call.
 - **Phase 3:** 45 catalog entries in six family files.
   - 59 of 65 entry/arch checks pass live from the sandbox. The other 6 are GitHub-hosted (talos, rescuezilla, netboot-xyz, shredos), and the weekly CI job checks them.
   - The independent verifier confirmed 21 of 25 pinned fingerprints on official pages. The other 4 are confirmed through the distro's documented chain, as each entry's notes explain: Proxmox ×2 via the keyring hash the wiki prints, Qubes via the master-key certification, and SystemRescue via the official key file (trust on first use).

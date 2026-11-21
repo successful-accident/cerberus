@@ -241,7 +241,7 @@ func Load(embedded fs.FS, overrideDirs ...string) (*Catalog, error) {
 		if ra, rb := rank(a), rank(b); ra != rb {
 			return ra - rb
 		}
-		return strings.Compare(a.Name, b.Name)
+		return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
 	})
 	for _, e := range c.Entries {
 		c.byID[e.ID] = e

@@ -80,11 +80,11 @@ func (a *app) listCatalog(cmd *cobra.Command, category string) error {
 			if cfg != nil && cfg.Selection(e.ID) != nil {
 				mark = "*"
 			}
-			line := fmt.Sprintf("  %s %-*s  %-*s  %s", mark, idw, e.ID, namew, e.Name, strings.Join(slices.Sorted(maps.Keys(e.Arch)), ","))
+			line := fmt.Sprintf("  %s %-*s  %-*s  %-11s", mark, idw, e.ID, namew, e.Name, strings.Join(slices.Sorted(maps.Keys(e.Arch)), ","))
 			if signed(e) {
 				line += "  signed"
 			}
-			fmt.Fprintln(out, line)
+			fmt.Fprintln(out, strings.TrimRight(line, " "))
 		}
 		fmt.Fprintln(out)
 	}
