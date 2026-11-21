@@ -196,9 +196,12 @@ If the host was off at sync time, the run happens after the next boot.
 `/etc/cron.d/cerberus` instead.
 
 For alerts, put an [ntfy](https://ntfy.sh) topic in
-`/etc/cerberus/ntfy-topic` with mode 0600. cerberus sends a summary whenever
-a sync updates or fails something. The topic never goes in the config file or
-the logs, because anyone who knows it can read your alerts.
+`/etc/cerberus/ntfy-topic` with mode 0600, or point
+`cerberus init --ntfy-topic-file` at a file you keep elsewhere. cerberus
+sends a summary whenever a sync updates or fails something, including a sync
+that can't start, such as on an unmounted storage. The topic never goes in
+the config file or the logs, because anyone who knows it can read your
+alerts.
 
 ## Add a distro
 

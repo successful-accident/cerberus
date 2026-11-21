@@ -2,6 +2,7 @@ package library
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -187,7 +188,7 @@ func TestRunRelocation(t *testing.T) {
 			e.plan(t, FilesMove, nil)
 			saves, progressed := 0, 0
 			var lastDone int
-			err := RunRelocation(e.s, func() error { saves++; return e.save() }, func(it RelocItem, done, total int) {
+			err := RunRelocation(e.s, func() error { saves++; return e.save() }, nil, func(it RelocItem, done, total int) {
 				progressed++
 				lastDone = done
 				if total != 3 || !it.Done {
@@ -197,7 +198,11 @@ func TestRunRelocation(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if saves != 4 || progressed != 3 || lastDone != 3 {
+			wantSaves := 4 // one per item, then the final switch
+			if copyPath {
+				wantSaves = 7 // plus each copy's journal entry before its first byte
+			}
+			if saves != wantSaves || progressed != 3 || lastDone != 3 {
 				t.Fatalf("saves=%d progressed=%d done=%d", saves, progressed, lastDone)
 			}
 			if e.s.Relocation != nil || e.s.Root != e.to.Root || e.s.Mode != ModeDir {
@@ -229,7 +234,7 @@ func TestRunRelocationToPVEUpdatesRels(t *testing.T) {
 	e.to = Layout{Mode: ModePVE, Root: e.to.Root}
 	e.s.Entries["a"].Kept = []KeptNote{{Rel: "a/a-1.iso", Reason: "in use by VM 1"}}
 	e.plan(t, FilesMove, nil)
-	if err := RunRelocation(e.s, e.save, nil); err != nil {
+	if err := RunRelocation(e.s, e.save, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if e.s.Mode != ModePVE || e.s.Entries["a"].Files[1].Rel != "a-1.iso" || e.s.Entries["a"].Kept[0].Rel != "a-1.iso" {
@@ -250,12 +255,13 @@ func TestRunRelocationInterruptedThenResumed(t *testing.T) {
 	calls := 0
 	crash := func() error {
 		calls++
-		if calls == 2 { // item 2 is on disk, but its Done flag never reaches state
+		// Saves go: item 1 copying, item 1 done, item 2 copying, item 2 done.
+		if calls == 4 { // item 2 is on disk, but its Done flag never reaches state
 			return errors.New("power cut")
 		}
 		return e.save()
 	}
-	if err := RunRelocation(e.s, crash, nil); err == nil {
+	if err := RunRelocation(e.s, crash, nil, nil); err == nil {
 		t.Fatal("want the interruption")
 	}
 	// Fresh process: reload what reached the disk.
@@ -270,7 +276,7 @@ func TestRunRelocationInterruptedThenResumed(t *testing.T) {
 		t.Fatal("first item should be moved")
 	}
 	var seen []string
-	if err := RunRelocation(s, func() error { return s.Save(e.statePath) }, func(it RelocItem, _, _ int) {
+	if err := RunRelocation(s, func() error { return s.Save(e.statePath) }, nil, func(it RelocItem, _, _ int) {
 		seen = append(seen, it.FromRel)
 	}); err != nil {
 		t.Fatal(err)
@@ -299,7 +305,7 @@ func TestRunRelocationCopyKeep(t *testing.T) {
 		return ""
 	}
 	e.plan(t, FilesMove, protect)
-	if err := RunRelocation(e.s, e.save, nil); err != nil {
+	if err := RunRelocation(e.s, e.save, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if !exists(e.from.Abs("a/a-1.iso")) || !exists(e.to.Abs("a/a-1.iso")) {
@@ -313,7 +319,7 @@ func TestRunRelocationCopyKeep(t *testing.T) {
 func TestRunRelocationCopyMode(t *testing.T) {
 	e := newReloc(t)
 	e.plan(t, FilesCopy, nil)
-	if err := RunRelocation(e.s, e.save, nil); err != nil {
+	if err := RunRelocation(e.s, e.save, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	for _, rel := range []string{"a/a-2.iso", "a/a-1.iso", "b/b-1.iso"} {
@@ -329,7 +335,7 @@ func TestRunRelocationCopyMode(t *testing.T) {
 func TestRunRelocationLeaveMode(t *testing.T) {
 	e := newReloc(t)
 	e.plan(t, FilesLeave, nil)
-	if err := RunRelocation(e.s, e.save, nil); err != nil {
+	if err := RunRelocation(e.s, e.save, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if len(e.s.Entries["a"].Files) != 0 || len(e.s.Entries["b"].Files) != 0 {
@@ -352,7 +358,7 @@ func TestRunRelocationAdoptedStays(t *testing.T) {
 	e := newReloc(t)
 	e.s.Entries["b"].Files[0].Adopted = true
 	e.plan(t, FilesMove, nil)
-	if err := RunRelocation(e.s, e.save, nil); err != nil {
+	if err := RunRelocation(e.s, e.save, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if len(e.s.Entries["b"].Files) != 0 || !exists(e.from.Abs("b/b-1.iso")) || exists(e.to.Abs("b/b-1.iso")) {
@@ -365,7 +371,7 @@ func TestRunRelocationDestinationAppearsLater(t *testing.T) {
 	e := newReloc(t)
 	e.plan(t, FilesMove, nil)
 	write(t, e.to.Abs("b/b-1.iso"), "someone else's")
-	err := RunRelocation(e.s, e.save, nil)
+	err := RunRelocation(e.s, e.save, nil, nil)
 	if !errors.Is(err, ErrExists) {
 		t.Fatalf("err=%v", err)
 	}
@@ -382,7 +388,7 @@ func TestRunRelocationIdenticalDestinationCountsAsDone(t *testing.T) {
 	e := newReloc(t)
 	write(t, e.to.Abs("b/b-1.iso"), "content of b-1.iso")
 	e.plan(t, FilesMove, nil)
-	if err := RunRelocation(e.s, e.save, nil); err != nil {
+	if err := RunRelocation(e.s, e.save, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	f := e.s.Entries["b"].Files[0]
@@ -396,7 +402,7 @@ func TestRunRelocationBadCopyIsRejected(t *testing.T) {
 	e := newReloc(t)
 	e.s.Entries["b"].Files[0].Hash = strings.Repeat("0", 64)
 	e.plan(t, FilesMove, nil)
-	err := RunRelocation(e.s, e.save, nil)
+	err := RunRelocation(e.s, e.save, nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "checksum") {
 		t.Fatalf("err=%v", err)
 	}
@@ -406,7 +412,7 @@ func TestRunRelocationBadCopyIsRejected(t *testing.T) {
 }
 
 func TestRunRelocationNothingToDo(t *testing.T) {
-	if err := RunRelocation(&State{}, func() error { return nil }, nil); err == nil {
+	if err := RunRelocation(&State{}, func() error { return nil }, nil, nil); err == nil {
 		t.Fatal("want an error")
 	}
 }
@@ -419,5 +425,179 @@ func TestSameFilesystem(t *testing.T) {
 	}
 	if same, err := SameFilesystem("/proc", dir); err != nil || same {
 		t.Fatalf("/proc vs temp: same=%v err=%v", same, err)
+	}
+}
+
+// twoRoots is a one-file dir-mode library at a, with an empty b to move to.
+func twoRoots(t *testing.T) (from, to Layout, s *State, rec FileRecord) {
+	t.Helper()
+	from = Layout{Mode: ModeDir, Root: filepath.Join(t.TempDir(), "a")}
+	to = Layout{Mode: ModeDir, Root: filepath.Join(t.TempDir(), "b")}
+	rec = recOf("deb/x-1.0.iso", "iso 1.0", 0)
+	write(t, from.Abs(rec.Rel), "iso 1.0")
+	s = &State{Schema: 1, Mode: ModeDir, Root: from.Root, Entries: map[string]*EntryState{"deb": {Files: []FileRecord{rec}}}}
+	return from, to, s, rec
+}
+
+func TestRelocationAdoptionSurvivesCrashBeforeSave(t *testing.T) {
+	from, to, s, rec := twoRoots(t)
+	write(t, to.Abs(rec.Rel), "iso 1.0") // the user's own identical copy
+	plan, err := PlanRelocation(s, from, to, FilesMove, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan.Items[0].Action = ActRename // as on one filesystem
+	s.Relocation = plan
+	statePath := filepath.Join(t.TempDir(), "state.json")
+	if err := s.Save(statePath); err != nil {
+		t.Fatal(err)
+	}
+	crash := errors.New("killed")
+	if err := RunRelocation(s, func() error { return crash }, nil, nil); !errors.Is(err, crash) {
+		t.Fatalf("first run: %v", err)
+	}
+	if !exists(from.Abs(rec.Rel)) {
+		t.Fatal("the source was removed before the adoption was saved")
+	}
+	s, err = LoadState(statePath) // what the next run sees
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RunRelocation(s, func() error { return nil }, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Entries["deb"].Files[0]; !got.Adopted {
+		t.Fatalf("record for the user's file %s is not adopted, so prune will delete it", got.Rel)
+	}
+	if exists(from.Abs(rec.Rel)) || read(t, to.Abs(rec.Rel)) != "iso 1.0" {
+		t.Fatal("the source should go once the adoption is saved, and the user's file stay")
+	}
+}
+
+func TestRelocationCopyCrashKeepsOwnCopyPrunable(t *testing.T) {
+	from, to, s, rec := twoRoots(t)
+	plan, err := PlanRelocation(s, from, to, FilesMove, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan.Items[0].Action = ActCopy
+	plan.Items[0].Copying = true // journaled before the copy began
+	s.Relocation = plan
+	// State as a kill after Place(dst.part, dst) but before the source was
+	// removed leaves it: cerberus's copy is at dst, the source still exists.
+	write(t, to.Abs(rec.Rel), "iso 1.0")
+	if err := RunRelocation(s, func() error { return nil }, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Entries["deb"].Files[0]; got.Adopted {
+		t.Fatalf("cerberus's own copy %s is now marked adopted and will never be pruned", got.Rel)
+	}
+	if exists(from.Abs(rec.Rel)) {
+		t.Fatal("the source should be removed")
+	}
+}
+
+func TestRelocationCopyAdoptsWhenPartFileIsLeft(t *testing.T) {
+	from, to, s, rec := twoRoots(t)
+	plan, err := PlanRelocation(s, from, to, FilesMove, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan.Items[0].Action, plan.Items[0].Copying = ActCopy, true
+	s.Relocation = plan
+	// A kill after Place adopted a file that appeared during the copy.
+	write(t, to.Abs(rec.Rel), "iso 1.0")
+	write(t, to.Abs(rec.Rel)+".part", "iso 1.0")
+	if err := RunRelocation(s, func() error { return nil }, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Entries["deb"].Files[0]; !got.Adopted {
+		t.Fatal("the file that was already there must be adopted")
+	}
+	if exists(to.Abs(rec.Rel)+".part") || exists(from.Abs(rec.Rel)) {
+		t.Fatal("the part file and the source should be removed")
+	}
+}
+
+func TestRelocationCopyRefusesUnknownPartFile(t *testing.T) {
+	forceCopy(t)
+	from, to, s, rec := twoRoots(t)
+	write(t, to.Abs(rec.Rel)+".part", "another program's download")
+	plan, err := PlanRelocation(s, from, to, FilesMove, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Relocation = plan
+	if err := RunRelocation(s, func() error { return nil }, nil, nil); err == nil || !strings.Contains(err.Error(), "in the way") {
+		t.Fatalf("err = %v", err)
+	}
+	if read(t, to.Abs(rec.Rel)+".part") != "another program's download" || !exists(from.Abs(rec.Rel)) {
+		t.Fatal("both files must stay")
+	}
+}
+
+func TestRelocationDropsOldPartials(t *testing.T) {
+	from, to, s, _ := twoRoots(t)
+	partRel := "deb/x-2.0.iso.part"
+	write(t, from.Abs(partRel), "half of 2.0")
+	write(t, from.Abs(partRel)+".meta", "{}")
+	write(t, to.Abs(partRel), "someone else's download")
+	s.Partials = map[string]Partial{partRel: {Entry: "deb", Version: "2.0"}}
+	plan, err := PlanRelocation(s, from, to, FilesMove, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Relocation = plan
+	if err := RunRelocation(s, func() error { return nil }, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	// Later, deb is deselected.
+	if _, err := Reconcile(to, s, func(string) bool { return false }); err != nil {
+		t.Fatal(err)
+	}
+	if !exists(to.Abs(partRel)) {
+		t.Errorf("deleted %s, which cerberus didn't write", to.Abs(partRel))
+	}
+	if exists(from.Abs(partRel)) || exists(from.Abs(partRel)+".meta") {
+		t.Errorf("%s is stranded in the old folder, and state no longer names it", from.Abs(partRel))
+	}
+	if len(s.Partials) != 0 {
+		t.Errorf("partials: %v", s.Partials)
+	}
+}
+
+func TestRelocationSkipsFileGoneFromBothPlaces(t *testing.T) {
+	e := newReloc(t)
+	e.plan(t, FilesMove, nil)
+	if err := os.Remove(e.from.Abs("a/a-1.iso")); err != nil { // deleted by hand
+		t.Fatal(err)
+	}
+	if err := RunRelocation(e.s, e.save, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if e.s.Relocation != nil || len(e.s.Entries["a"].Files) != 1 || e.s.Entries["a"].Files[0].Rel != "a/a-2.iso" {
+		t.Fatalf("the missing file's record should be dropped: %+v", e.s.Entries["a"])
+	}
+}
+
+func TestRunRelocationStopsWhenBeforeFails(t *testing.T) {
+	e := newReloc(t)
+	e.plan(t, FilesMove, nil)
+	calls := 0
+	stop := errors.New("storage inactive")
+	err := RunRelocation(e.s, e.save, func(it RelocItem, rec FileRecord) error {
+		if calls++; calls == 2 {
+			return stop
+		}
+		return nil
+	}, nil)
+	if !errors.Is(err, stop) {
+		t.Fatalf("err = %v", err)
+	}
+	if e.s.Relocation == nil || !e.s.Relocation.Items[0].Done || e.s.Relocation.Items[1].Done {
+		t.Fatalf("the journal should stop after item 1: %+v", e.s.Relocation)
+	}
+	if exists(e.to.Abs(e.s.Relocation.Items[1].ToRel)) {
+		t.Fatal("item 2 was written after the check failed")
 	}
 }

@@ -91,17 +91,18 @@
   homepage: https://endeavouros.com/
   arch: {amd64: x86_64}
   steps:
-    - fetch: https://mirror.alpix.eu/endeavouros/iso/
-      match: 'href="(?P<file>EndeavourOS_[A-Za-z]+(?:[_-][A-Za-z]+)*-(?P<version>\d{4}\.\d{2}\.\d{2})\.iso)"'
-    - fetch: https://mirror.alpix.eu/endeavouros/iso/{file}.sha512sum
-      match: '(?m)^(?P<sha512>[0-9a-f]{128})\s+\*?{file}$'
+    # The release and its sha512 come from endeavouros.com, not the mirror: an ISO signature covers only the
+    # bytes, so a mirror that chose the version could replay an old signed ISO under a newer name.
+    - fetch: https://endeavouros.com/download/
+      match: '(?s)<code>(?P<file>EndeavourOS_[A-Za-z]+(?:[_-][A-Za-z]+)*-(?P<version>\d{4}\.\d{2}\.\d{2})\.iso)</code>.*?id="sha512-value">(?P<sha512>[0-9a-f]{128})<'
   url: https://mirror.alpix.eu/endeavouros/iso/{file}
   signature: {type: detached-iso, url: '{url}.sig'}
   keys: [endeavouros-iso]
   fingerprints: [8F43FC374CD4CEEA19CEE323E3D8752ACDF595A1]
   notes: >-
-    Releases carry a codename, such as Titan-Nova-2026.08.15, so the match
-    takes the ISOs with a dotted date and sorts by it. Key 8F43FC374CD4CEEA19CEE323E3D8752ACDF595A1
+    The download page on endeavouros.com names the current ISO and prints its sha512, so the version and the
+    checksum come from the distro's own site, and only the ISO and its signature from the mirror. Releases carry
+    a codename, such as Titan-Nova-2026.08.15, so the match takes the ISO with a dotted date. Key 8F43FC374CD4CEEA19CEE323E3D8752ACDF595A1
     (Johannes Kamprad) downloaded from
     https://keyserver.ubuntu.com/pks/lookup?op=get&options=mr&search=0x8F43FC374CD4CEEA19CEE323E3D8752ACDF595A1
     and its fingerprint confirmed on https://endeavouros.com/download/, which

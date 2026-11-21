@@ -62,7 +62,9 @@ func Prune(l Layout, es *EntryState, keep int, protect ProtectFunc) (removed []F
 //
 // If s.Pending is set, the placement is finished when its destination
 // exists with the recorded size and checksum: the record is added to the
-// entry if missing, and the part file is removed if still there. Otherwise
+// entry if missing. If the part file is still there too, the rename never
+// happened, since Place leaves the part file when it adopts, so the record
+// is marked Adopted and the part file is removed. Otherwise
 // the pending record is dropped, and the part file is kept as a resumable
 // Partial if it still exists. Partials for entries that are no longer
 // selected, as reported by selected(id), are deleted with their .meta

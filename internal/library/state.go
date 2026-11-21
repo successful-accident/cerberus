@@ -11,7 +11,10 @@ import (
 )
 
 // LoadState reads state from path. A missing file yields an empty Schema 1
-// state. An unknown Schema is an error.
+// state. An unknown Schema is an error, and so is any library-relative path
+// (a record's Rel, a kept note, the pending part and file, a partial's key,
+// or a relocation item's paths) that isn't a plain path inside the library,
+// so nothing cerberus deletes can come from outside it.
 func LoadState(path string) (*State, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -32,7 +35,41 @@ func LoadState(path string) (*State, error) {
 	if s.Entries == nil {
 		s.Entries = map[string]*EntryState{}
 	}
+	if rel := s.outsidePath(); rel != "" {
+		return nil, fmt.Errorf("state %s names %q, which isn't a path inside the library", path, rel)
+	}
 	return &s, nil
+}
+
+// outsidePath returns the first library-relative path in s that isn't
+// local, or "".
+func (s *State) outsidePath() string {
+	var rels []string
+	for _, es := range s.Entries {
+		for _, f := range es.Files {
+			rels = append(rels, f.Rel)
+		}
+		for _, k := range es.Kept {
+			rels = append(rels, k.Rel)
+		}
+	}
+	if p := s.Pending; p != nil {
+		rels = append(rels, p.Part, p.File.Rel)
+	}
+	for k := range s.Partials {
+		rels = append(rels, k)
+	}
+	if r := s.Relocation; r != nil {
+		for _, it := range r.Items {
+			rels = append(rels, it.FromRel, it.ToRel)
+		}
+	}
+	for _, rel := range rels {
+		if !filepath.IsLocal(rel) {
+			return rel
+		}
+	}
+	return ""
 }
 
 // Save writes s to path atomically: a temp file in the same folder, fsync,

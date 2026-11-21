@@ -69,6 +69,20 @@ var ErrNeedRoot = errors.New("pve mode needs root, because PVE's storage folders
 // ErrRelocating means a library move is unfinished.
 var ErrRelocating = errors.New("a library move is unfinished")
 
+// ErrNoMarker means state records files in the library, but its folder has
+// no owner marker, as when a share isn't mounted.
+var ErrNoMarker = errors.New("the library folder has no owner marker")
+
+// squashHint explains a permission error while writing to a Proxmox
+// storage. cerberus runs as root there, so on NFS the likely cause is an
+// export with root_squash. Other errors are returned as they are.
+func squashHint(err error, l library.Layout, storage string) error {
+	if l.Mode != library.ModePVE || !errors.Is(err, fs.ErrPermission) {
+		return err
+	}
+	return fmt.Errorf("%w; cerberus runs as root, so if storage %s is NFS, its export likely has root_squash: export it with no_root_squash, or use another storage", err, storage)
+}
+
 // Layout works out where the library lives now. In PVE mode it needs root
 // and asks PVE whether the storage is enabled and active.
 func (e *Env) Layout(ctx context.Context) (library.Layout, error) {
@@ -111,7 +125,9 @@ type OpenOptions struct {
 
 // Open takes the run lock, loads state, checks that the config and state
 // agree on where the library is, claims the owner marker, and reconciles
-// work a crash interrupted.
+// work a crash interrupted. When state records files but the library folder
+// has no owner marker, as when a share isn't mounted, it returns an error
+// wrapping ErrNoMarker, unless o.TakeOver is set.
 func Open(ctx context.Context, env *Env, o OpenOptions) (*Session, error) {
 	lock, err := library.AcquireLock(env.Paths.Lock())
 	if err != nil {
@@ -144,19 +160,33 @@ func (s *Session) open(ctx context.Context, o OpenOptions) error {
 	if st.Root != "" && (st.Root != s.Layout.Root || st.Mode != s.Layout.Mode) {
 		return fmt.Errorf("the config points at %s, but the library is at %s; use `cerberus location set` to move it", s.Layout.Root, st.Root)
 	}
+	if !o.TakeOver && hasFiles(st) {
+		if _, err := os.Lstat(filepath.Join(s.Layout.Root, library.OwnerFile)); errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("%w, though cerberus has files recorded in %s; it looks empty or unmounted. Mount it, or run cerberus sync --take-over to use it as it is", ErrNoMarker, s.Layout.Root)
+		}
+	}
 	if s.Layout.Mode == library.ModeDir {
 		if err := os.MkdirAll(s.Layout.Root, 0o755); err != nil {
 			return err
 		}
 	}
 	if err := library.ClaimOwner(s.Layout.Root, env.machineID(), o.TakeOver); err != nil {
-		return err
+		return squashHint(err, s.Layout, env.Config.Storage)
 	}
 	st.Mode, st.Root = s.Layout.Mode, s.Layout.Root
 	if s.Notes, err = library.Reconcile(s.Layout, st, func(id string) bool { return env.Config.Selection(id) != nil }); err != nil {
 		return err
 	}
 	return s.Save()
+}
+
+func hasFiles(st *library.State) bool {
+	for _, es := range st.Entries {
+		if len(es.Files) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // Save writes the state.
@@ -483,6 +513,10 @@ func (s *Session) forgetMissing(id string, es *library.EntryState) {
 	})
 }
 
+// spaceCheckEvery is how often a download of unknown size checks the
+// reserve again; tests lower it.
+var spaceCheckEvery int64 = 256 << 20
+
 // fetchAndPlace downloads, verifies and places one release, journaling each
 // step in state.
 func (s *Session) fetchAndPlace(ctx context.Context, j *job, es *library.EntryState) (library.FileRecord, error) {
@@ -503,13 +537,18 @@ func (s *Session) fetchAndPlace(ctx context.Context, j *job, es *library.EntrySt
 			s.dropPartial(p)
 		}
 	}
+	if _, ours := st.Partials[partRel]; !ours {
+		if _, err := os.Lstat(part); err == nil {
+			return library.FileRecord{}, fmt.Errorf("%s is in the way, and cerberus didn't write it; move it, or delete it if it's a stale download", part)
+		}
+	}
 	if l.Mode == library.ModePVE {
 		if _, err := host.PVEStorageReady(ctx, env.Run, env.Host.Node, env.Config.Storage); err != nil {
 			return library.FileRecord{}, stopError{err}
 		}
 	}
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return library.FileRecord{}, err
+		return library.FileRecord{}, squashHint(err, l, env.Config.Storage)
 	}
 	size, err := env.Client.Size(ctx, rel.URL)
 	if err != nil {
@@ -527,16 +566,39 @@ func (s *Session) fetchAndPlace(ctx context.Context, j *job, es *library.EntrySt
 		return library.FileRecord{}, err
 	}
 	env.logf("%s: downloading %s (%s)", id, rel.Version, HumanSize(size))
-	var progress download.Progress
-	if env.Progress != nil {
-		progress = func(done, total int64) { env.Progress(id, done, total) }
+	// The transfer is held to the size checked against the reserve. With no
+	// size to hold it to, the reserve is checked again as it grows.
+	fetchCtx, stop := context.WithCancelCause(ctx)
+	defer stop(nil)
+	errTooBig := fmt.Errorf("the server sent more than the %s it declared, so the download was deleted", HumanSize(size))
+	nextCheck := spaceCheckEvery
+	progress := func(done, total int64) {
+		if env.Progress != nil {
+			env.Progress(id, done, total)
+		}
+		switch {
+		case size > 0 && done > size:
+			stop(errTooBig)
+		case size <= 0 && done >= nextCheck:
+			nextCheck = done + spaceCheckEvery
+			if err := download.CheckSpace(filepath.Dir(dst), 0, env.Config.Reserve.Percent, env.Config.Reserve.MinBytes()); err != nil {
+				stop(err)
+			}
+		}
 	}
-	if _, err := env.Client.Fetch(ctx, rel.URL, part, progress); err != nil {
-		if errors.Is(err, download.ErrNoSpace) {
+	if _, err := env.Client.Fetch(fetchCtx, rel.URL, part, progress); err != nil {
+		if cause := context.Cause(fetchCtx); ctx.Err() == nil && cause != nil {
+			err = cause
+		}
+		switch {
+		case errors.Is(err, download.ErrNoSpace):
 			s.dropPartial(partRel)
 			return library.FileRecord{}, stopError{err}
+		case err == errTooBig:
+			s.dropPartial(partRel)
+			return library.FileRecord{}, err
 		}
-		return library.FileRecord{}, fmt.Errorf("download failed; the next run resumes it: %w", err)
+		return library.FileRecord{}, fmt.Errorf("download failed; the next run resumes it: %w", squashHint(err, l, env.Config.Storage))
 	}
 	ok, err := rel.Checksum.MatchFile(part)
 	if err != nil {
@@ -573,13 +635,21 @@ func (s *Session) fetchAndPlace(ctx context.Context, j *job, es *library.EntrySt
 		if errors.Is(err, library.ErrExists) {
 			err = fmt.Errorf("%s is already in the library and differs from the download; cerberus won't overwrite a file it didn't write", rel.Filename)
 		}
-		return library.FileRecord{}, errors.Join(err, s.Save())
+		return library.FileRecord{}, errors.Join(squashHint(err, l, env.Config.Storage), s.Save())
 	}
 	rec.Adopted = adopted
 	es.Files = slices.DeleteFunc(es.Files, func(f library.FileRecord) bool { return f.Rel == rec.Rel })
 	es.Files = append([]library.FileRecord{rec}, es.Files...)
 	st.Pending = nil
-	return rec, s.Save()
+	if err := s.Save(); err != nil {
+		return library.FileRecord{}, err
+	}
+	// An adoption leaves the download, so a crash before the save above
+	// still shows Reconcile both files. Now it can go.
+	if adopted {
+		removeQuietly(part)
+	}
+	return rec, nil
 }
 
 func (s *Session) checkISOSignature(ctx context.Context, j *job, part string) (string, error) {

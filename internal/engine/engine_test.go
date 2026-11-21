@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -587,6 +589,10 @@ func TestHandUploadedFiles(t *testing.T) {
 		if res.Status != library.StatusUpdated || !strings.Contains(res.Message, "adopted") {
 			t.Fatalf("adopt: %+v", res)
 		}
+		wantGone(t, mine+".part")
+		if st := loadState(t, env); len(st.Entries["testos"].Files) != 1 || !st.Entries["testos"].Files[0].Adopted {
+			t.Fatalf("state should record the adoption: %+v", st.Entries["testos"])
+		}
 		m.release("1.0", "1.1")
 		syncOnce(t, env, OpenOptions{})
 		wantFile(t, mine, isoBody("1.0")) // pruned from state, but the file stays
@@ -843,5 +849,297 @@ func TestHumanSize(t *testing.T) {
 		if got := HumanSize(n); got != want {
 			t.Errorf("HumanSize(%d) = %q, want %q", n, got, want)
 		}
+	}
+}
+
+func TestRelocateFinishesWhenAFileWasDeletedByHand(t *testing.T) {
+	m := newMirror(t)
+	m.release("1.0")
+	env := newEnv(t, m, loadCatalog(t, fmt.Sprintf(plainEntry, m.srv.URL), nil))
+	syncOnce(t, env, OpenOptions{})
+	if err := os.Remove(filepath.Join(env.Config.Dir, "testos", isoName("1.0"))); err != nil {
+		t.Fatal(err)
+	}
+	newDir := filepath.Join(filepath.Dir(env.Config.Dir), "moved")
+	s, err := Open(context.Background(), env, OpenOptions{Resume: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = s.Relocate(context.Background(), Target{Mode: library.ModeDir, Dir: newDir}, library.FilesMove, false, nil)
+	s.Close()
+	if err != nil {
+		t.Fatalf("Relocate: %v", err)
+	}
+	s, err = Open(context.Background(), env, OpenOptions{})
+	if err != nil {
+		t.Fatalf("the library is stuck: %v", err)
+	}
+	s.Close()
+	if got := versions(loadState(t, env)); len(got) != 0 {
+		t.Errorf("the deleted file's record should be dropped: %v", got)
+	}
+}
+
+func TestStateNamingAPathOutsideTheLibraryIsRefused(t *testing.T) {
+	m := newMirror(t)
+	m.release("1.0")
+	env := newEnv(t, m, loadCatalog(t, fmt.Sprintf(plainEntry, m.srv.URL), nil))
+	syncOnce(t, env, OpenOptions{})
+	victim := filepath.Join(filepath.Dir(env.Config.Dir), "victim.iso")
+	if err := os.WriteFile(victim, []byte("not cerberus's"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st := loadState(t, env)
+	es := st.Entries["testos"]
+	es.Files = append(es.Files, library.FileRecord{Version: "0.9", Rel: "../victim.iso", Algo: "sha256", Hash: sumHex([]byte("x"))})
+	if err := st.Save(env.Paths.State()); err != nil { // hand-edited, or corrupt
+		t.Fatal(err)
+	}
+	s, err := Open(context.Background(), env, OpenOptions{})
+	if err == nil {
+		_, err = s.Forget([]string{"testos"}, true)
+		s.Close()
+		t.Errorf("Open accepted a state file that names ../victim.iso (Forget: %v)", err)
+	} else if !strings.Contains(err.Error(), "../victim.iso") {
+		t.Errorf("the refusal should name the path: %v", err)
+	}
+	wantFile(t, victim, []byte("not cerberus's"))
+}
+
+func TestSyncLeavesAnotherProgramsPartFileAlone(t *testing.T) {
+	m := newMirror(t)
+	m.release("1.0")
+	env := newEnv(t, m, loadCatalog(t, fmt.Sprintf(plainEntry, m.srv.URL), nil))
+	part := filepath.Join(env.Config.Dir, "testos", isoName("1.0")+".part")
+	if err := os.MkdirAll(filepath.Dir(part), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(part, []byte("another program's download"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res := onlyResult(t, syncOnce(t, env, OpenOptions{}))
+	if res.Status != library.StatusFailed || !strings.Contains(res.Message, "in the way") {
+		t.Errorf("want a failure naming the part file: %+v", res)
+	}
+	wantFile(t, part, []byte("another program's download"))
+}
+
+func TestUnmountedLibraryIsRefused(t *testing.T) {
+	m := newMirror(t)
+	m.release("1.0")
+	env := newEnv(t, m, loadCatalog(t, fmt.Sprintf(plainEntry, m.srv.URL), nil))
+	syncOnce(t, env, OpenOptions{})
+	if err := os.Rename(env.Config.Dir, env.Config.Dir+".share"); err != nil { // the share is unmounted
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(env.Config.Dir, 0o755); err != nil { // the bare mount point
+		t.Fatal(err)
+	}
+	if _, err := Open(context.Background(), env, OpenOptions{}); !errors.Is(err, ErrNoMarker) {
+		t.Fatalf("Open of an unmounted library: %v", err)
+	}
+	if n := m.getCount("/testos/" + isoName("1.0")); n != 1 {
+		t.Errorf("downloaded %d times", n)
+	}
+	if got := versions(loadState(t, env)); len(got) != 1 {
+		t.Errorf("state lost its records: %v", got)
+	}
+	// --take-over uses the folder as it is.
+	if res := onlyResult(t, syncOnce(t, env, OpenOptions{TakeOver: true})); res.Status != library.StatusUpdated {
+		t.Errorf("take over: %+v", res)
+	}
+}
+
+func TestRelocateToPVEInTheSameFolderKeepsOwnerMarker(t *testing.T) {
+	m := newMirror(t)
+	m.release("1.0")
+	env := newEnv(t, m, loadCatalog(t, fmt.Sprintf(plainEntry, m.srv.URL), nil))
+	isoDir := pveEnv(t, env, true, "")
+	env.Config.Mode, env.Config.Dir, env.Config.Storage = library.ModeDir, isoDir, ""
+	syncOnce(t, env, OpenOptions{})
+	s, err := Open(context.Background(), env, OpenOptions{Resume: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Relocate(context.Background(), Target{Mode: library.ModePVE, Storage: "local"}, library.FilesMove, false, nil); err != nil {
+		t.Fatalf("Relocate: %v", err)
+	}
+	s.Close()
+	if _, err := os.Stat(filepath.Join(isoDir, library.OwnerFile)); err != nil {
+		t.Fatalf("the library's owner marker is gone after the move: %v", err)
+	}
+	wantFile(t, filepath.Join(isoDir, isoName("1.0")), isoBody("1.0"))
+}
+
+// sizeLiar serves testos 1.0 with a HEAD that declares one size, or none,
+// and a chunked GET that sends extra bytes after the ISO.
+func sizeLiar(t *testing.T, declare bool, extra int) *mirror {
+	body := isoBody("1.0")
+	sums := []byte(sumHex(body) + "  " + isoName("1.0") + "\n")
+	chunk := make([]byte, 1<<20)
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/testos/SHA256SUMS":
+			w.Write(sums)
+		case "/testos/" + isoName("1.0"):
+			if r.Method == http.MethodHead {
+				if declare {
+					w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+				}
+				return
+			}
+			w.WriteHeader(http.StatusOK) // no Content-Length: chunked
+			w.Write(body)
+			for i := 0; i < extra; i++ {
+				if _, err := w.Write(chunk); err != nil {
+					return
+				}
+				w.(http.Flusher).Flush()
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return &mirror{srv: srv}
+}
+
+func TestDownloadStopsAtDeclaredSize(t *testing.T) {
+	m := sizeLiar(t, true, 32) // 32 MiB the HEAD never mentioned
+	env := newEnv(t, m, loadCatalog(t, fmt.Sprintf(plainEntry, m.srv.URL), nil))
+	var mu sync.Mutex
+	var most int64
+	env.Progress = func(_ string, done, _ int64) {
+		mu.Lock()
+		most = max(most, done)
+		mu.Unlock()
+	}
+	res := onlyResult(t, syncOnce(t, env, OpenOptions{}))
+	if res.Status != library.StatusFailed || !strings.Contains(res.Message, "more than") {
+		t.Fatalf("want failed: %+v", res)
+	}
+	// One read buffer past the declared size is the most that can land.
+	if limit := int64(len(isoBody("1.0"))) + 1<<20; most > limit {
+		t.Fatalf("wrote %d bytes of a download whose declared size, checked against the reserve, was %d", most, len(isoBody("1.0")))
+	}
+	wantGone(t, filepath.Join(env.Config.Dir, "testos", isoName("1.0")+".part"))
+}
+
+func TestDownloadOfUnknownSizeRechecksReserve(t *testing.T) {
+	old := spaceCheckEvery
+	spaceCheckEvery = 1 << 20
+	t.Cleanup(func() { spaceCheckEvery = old })
+	m := sizeLiar(t, false, 32)
+	env := newEnv(t, m, loadCatalog(t, fmt.Sprintf(plainEntry, m.srv.URL), nil))
+	env.Progress = func(_ string, done, _ int64) {
+		// The disk fills while the download runs.
+		env.Config.Reserve = config.Reserve{MinGB: 1e9}
+	}
+	rep := syncOnce(t, env, OpenOptions{})
+	if !errors.Is(rep.Stopped, download.ErrNoSpace) {
+		t.Fatalf("want the run stopped for space: %+v, %v", rep.Results, rep.Stopped)
+	}
+	wantGone(t, filepath.Join(env.Config.Dir, "testos", isoName("1.0")+".part"))
+}
+
+func TestRelocateToPVERechecksStorageBeforeEachFile(t *testing.T) {
+	m := newMirror(t)
+	m.release("1.0")
+	env := newEnv(t, m, loadCatalog(t, fmt.Sprintf(plainEntry, m.srv.URL), nil))
+	env.Config.Selection("testos").Keep = 2
+	syncOnce(t, env, OpenOptions{})
+	m.release("1.0", "1.1")
+	syncOnce(t, env, OpenOptions{})
+	if got := versions(loadState(t, env)); len(got) != 2 {
+		t.Fatalf("setup: want two kept versions, got %v", got)
+	}
+
+	isoDir := filepath.Join(filepath.Dir(env.Paths.StateDir), "pve", "template", "iso")
+	if err := os.MkdirAll(isoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(env.HostRoot, "etc", "pve", "nodes", "pve1", "qemu-server"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	list := func(active int) string {
+		return fmt.Sprintf(`[{"active":%d,"avail":81085388800,"content":"iso","enabled":1,"shared":1,"storage":"nfs","total":100861726720,"type":"nfs","used":1}]`, active)
+	}
+	const listCmd = "pvesh get /nodes/pve1/storage --content iso --enabled 1 --output-format json"
+	fr := &fakeRunner{out: map[string]string{
+		listCmd:                                 list(1),
+		"pvesm path nfs:iso/cerberus-probe.iso": isoDir + "/cerberus-probe.iso\n",
+	}}
+	env.Host = &host.Info{Kind: host.KindPVE, Hostname: "pve1", Node: "pve1", MachineID: "machine-1", Root: true}
+	env.Run = fr
+
+	s, err := Open(context.Background(), env, OpenOptions{Resume: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	written := 0
+	err = s.Relocate(context.Background(), Target{Mode: library.ModePVE, Storage: "nfs"}, library.FilesCopy, false,
+		func(it library.RelocItem, done, total int) {
+			written = done
+			fr.mu.Lock()
+			fr.out[listCmd] = list(0) // the NFS share drops after the first file
+			fr.mu.Unlock()
+		})
+	if err == nil || !strings.Contains(err.Error(), "not active") {
+		t.Errorf("Relocate: %v, want the inactive storage named", err)
+	}
+	n := 0
+	for _, v := range []string{"1.0", "1.1"} {
+		if _, err := os.Stat(filepath.Join(isoDir, isoName(v))); err == nil {
+			n++
+		}
+	}
+	if n > 1 || written > 1 {
+		t.Fatalf("%d files written to storage nfs, but PVE reported it inactive after the first", n)
+	}
+	if st := loadState(t, env); st.Relocation == nil {
+		t.Error("the move's journal should stay, so it can resume")
+	}
+}
+
+func TestRelocateCopyKeepsReserve(t *testing.T) {
+	m := newMirror(t)
+	m.release("1.0")
+	env := newEnv(t, m, loadCatalog(t, fmt.Sprintf(plainEntry, m.srv.URL), nil))
+	syncOnce(t, env, OpenOptions{})
+	env.Config.Reserve = config.Reserve{MinGB: 1e9} // no disk has a billion GB free
+	newDir := filepath.Join(filepath.Dir(env.Config.Dir), "moved")
+
+	s, err := Open(context.Background(), env, OpenOptions{Resume: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = s.Relocate(context.Background(), Target{Mode: library.ModeDir, Dir: newDir}, library.FilesCopy, false, nil)
+	s.Close()
+	if !errors.Is(err, download.ErrNoSpace) {
+		t.Errorf("Relocate with the reserve unmet: err = %v, want ErrNoSpace", err)
+	}
+	if _, err := os.Stat(filepath.Join(newDir, "testos", isoName("1.0"))); err == nil {
+		t.Errorf("the ISO was copied although it eats into the reserve")
+	}
+	// Refused up front, so the library isn't left mid-move.
+	if st := loadState(t, env); st.Relocation != nil || st.Root != env.Config.Dir {
+		t.Errorf("state after the refusal: root %s, relocation %+v", st.Root, st.Relocation)
+	}
+}
+
+func TestPermissionErrorOnPVENamesRootSquash(t *testing.T) {
+	denied := &fs.PathError{Op: "open", Path: "/mnt/pve/nfs/template/iso/x.iso.part", Err: syscall.EACCES}
+	pve := library.Layout{Mode: library.ModePVE, Root: "/mnt/pve/nfs/template/iso"}
+	err := squashHint(fmt.Errorf("download failed: %w", denied), pve, "nfs")
+	if !errors.Is(err, fs.ErrPermission) || !strings.Contains(err.Error(), "root_squash") || !strings.Contains(err.Error(), "storage nfs is NFS") {
+		t.Errorf("PVE permission error: %v", err)
+	}
+	if err := squashHint(denied, library.Layout{Mode: library.ModeDir}, ""); err != denied {
+		t.Errorf("dir mode should pass the error through: %v", err)
+	}
+	other := errors.New("no space")
+	if err := squashHint(other, pve, "nfs"); err != other {
+		t.Errorf("other errors should pass through: %v", err)
 	}
 }

@@ -94,13 +94,22 @@ func protectReason(protect ProtectFunc, rel string) string {
 }
 
 // RunRelocation executes s.Relocation, or resumes it, one item at a time,
-// marking each Done and calling save after each item. A copy goes to
-// <dst>.part, is verified against the record's checksum, is renamed with
-// Place, and only then is the source removed (ActCopy). When every item is
-// done, it rewrites each FileRecord.Rel, drops skipped records, sets s.Mode
-// and s.Root, clears s.Relocation, and calls save one last time. progress
-// may be nil.
-func RunRelocation(s *State, save func() error, progress func(item RelocItem, done, total int)) error {
+// marking each Done and calling save after each item. Before each item that
+// isn't ActSkip, it calls before, when not nil, and stops on its error with
+// the journal intact, so a later run resumes; the engine uses it to recheck
+// the target. A copy goes to <dst>.part, journaled as Copying before the
+// first byte, is verified against the record's checksum, and is renamed
+// with Place. A source that's no longer needed (ActCopy and ActRename), and
+// a part file an adoption left, are removed only after the save that
+// records the item, so a crash never leaves an adopted file looking like
+// cerberus's own. A file gone from both places becomes ActSkip, and its
+// record is dropped. When every item is done, it deletes the partial
+// downloads in s.Partials under the old root, with their .meta files, and
+// clears s.Partials; rewrites each FileRecord.Rel; drops skipped records;
+// sets s.Mode and s.Root; clears s.Relocation; and calls save one last
+// time. progress may be nil.
+func RunRelocation(s *State, save func() error, before func(item RelocItem, rec FileRecord) error,
+	progress func(item RelocItem, done, total int)) error {
 	r := s.Relocation
 	if r == nil {
 		return errors.New("no relocation in progress")
@@ -122,7 +131,13 @@ func RunRelocation(s *State, save func() error, progress func(item RelocItem, do
 		if rec == nil {
 			return fmt.Errorf("relocate %s: no record for %s", it.Entry, it.FromRel)
 		}
-		if err := relocateOne(from, to, it, rec); err != nil {
+		if before != nil && it.Action != ActSkip {
+			if err := before(*it, *rec); err != nil {
+				return fmt.Errorf("relocate %s: %w", it.Entry, err)
+			}
+		}
+		leftovers, err := relocateOne(from, to, it, rec, save)
+		if err != nil {
 			return fmt.Errorf("relocate %s: %w", it.Entry, err)
 		}
 		it.Done = true
@@ -130,10 +145,29 @@ func RunRelocation(s *State, save func() error, progress func(item RelocItem, do
 		if err := save(); err != nil {
 			return err
 		}
+		for _, p := range leftovers {
+			if err := removeFile(p); err != nil {
+				return fmt.Errorf("relocate %s: %w", it.Entry, err)
+			}
+		}
 		if progress != nil {
 			progress(*it, done, total)
 		}
 	}
+
+	// The old root's partial downloads are cerberus's own, and a key would
+	// name a path under the new root once Root changes.
+	for k := range s.Partials {
+		if !filepath.IsLocal(k) {
+			return fmt.Errorf("refusing to delete partial %q: not a path inside the library", k)
+		}
+		for _, p := range []string{from.Abs(k), from.Abs(k) + ".meta"} {
+			if err := removeFile(p); err != nil {
+				return fmt.Errorf("delete partial %s: %w", p, err)
+			}
+		}
+	}
+	s.Partials = nil
 
 	moved := map[string]string{} // entry + "\x00" + old rel -> new rel
 	dropped := map[string]bool{}
@@ -189,69 +223,112 @@ func findRecord(s *State, entry, rel string) *FileRecord {
 	return nil
 }
 
-// relocateOne moves, or copies, one file. A destination that already holds
-// the file counts as done: when the source is still there too, the file was
-// already in the destination before we got to it, so its record is marked
-// adopted and cerberus never deletes it.
-func relocateOne(from, to Layout, it *RelocItem, rec *FileRecord) error {
+// relocateOne moves, or copies, one file, and returns the files to remove
+// once the item is saved as done. A destination that already holds the file
+// counts as done. It is cerberus's own when a rename consumed the source or
+// a journaled copy's part file was renamed; otherwise the file was already
+// in the destination, so its record is marked adopted and cerberus never
+// deletes it.
+func relocateOne(from, to Layout, it *RelocItem, rec *FileRecord, save func() error) (leftovers []string, err error) {
 	if it.Action == ActSkip {
-		return nil
+		return nil, nil
 	}
 	if !filepath.IsLocal(it.FromRel) || !filepath.IsLocal(it.ToRel) {
-		return fmt.Errorf("refusing paths outside the library: %q, %q", it.FromRel, it.ToRel)
+		return nil, fmt.Errorf("refusing paths outside the library: %q, %q", it.FromRel, it.ToRel)
 	}
 	src, dst := from.Abs(it.FromRel), to.Abs(it.ToRel)
+	part := dst + ".part"
 	sum := rec.Checksum()
+	moves := it.Action == ActCopy || it.Action == ActRename
 
-	_, serr := os.Lstat(src)
-	srcGone := errors.Is(serr, fs.ErrNotExist)
-	if serr != nil && !srcGone {
-		return serr
+	srcGone, err := missing(src)
+	if err != nil {
+		return nil, err
+	}
+	partLeft := false
+	if it.Copying {
+		gone, err := missing(part)
+		if err != nil {
+			return nil, err
+		}
+		if partLeft = !gone; partLeft {
+			leftovers = append(leftovers, part)
+		}
 	}
 	exists, same, err := existing(dst, sum)
 	if err != nil {
-		return fmt.Errorf("check %s: %w", dst, err)
+		return nil, fmt.Errorf("check %s: %w", dst, err)
 	}
 	if exists && !same {
-		return fmt.Errorf("%w: %s", ErrExists, dst)
+		return nil, fmt.Errorf("%w: %s", ErrExists, dst)
 	}
 	if exists {
-		if !srcGone {
-			rec.Adopted = true
-			if it.Action == ActCopy || it.Action == ActRename {
-				return removeFile(src)
-			}
+		ours := it.Action == ActRename && srcGone || it.Copying && !partLeft
+		rec.Adopted = rec.Adopted || !ours
+		if moves && !srcGone {
+			leftovers = append(leftovers, src)
 		}
-		return nil
+		return leftovers, nil
 	}
 	if srcGone {
-		return fmt.Errorf("source %s is missing", src)
+		it.Action, it.Reason = ActSkip, "the file was already gone"
+		return leftovers, nil
 	}
 
 	if it.Action == ActRename {
 		adopted, err := Place(src, dst, sum)
-		rec.Adopted = rec.Adopted || adopted
-		return err
-	}
-	if err := copyFile(src, dst+".part"); err != nil {
-		return err
-	}
-	if ok, err := sum.MatchFile(dst + ".part"); err != nil || !ok {
-		os.Remove(dst + ".part")
 		if err != nil {
-			return fmt.Errorf("verify copy of %s: %w", src, err)
+			return nil, err
 		}
-		return fmt.Errorf("copy of %s does not match its recorded %s checksum", src, sum.Algo)
+		if adopted {
+			rec.Adopted = true
+			leftovers = append(leftovers, src)
+		}
+		return leftovers, nil
 	}
-	adopted, err := Place(dst+".part", dst, sum)
+	if !it.Copying {
+		if gone, err := missing(part); err != nil {
+			return nil, err
+		} else if !gone {
+			return nil, fmt.Errorf("%s is in the way, and cerberus didn't write it", part)
+		}
+		it.Copying = true
+		if err := save(); err != nil {
+			return nil, err
+		}
+	}
+	if err := copyFile(src, part); err != nil {
+		return nil, err
+	}
+	if ok, err := sum.MatchFile(part); err != nil || !ok {
+		os.Remove(part)
+		if err != nil {
+			return nil, fmt.Errorf("verify copy of %s: %w", src, err)
+		}
+		return nil, fmt.Errorf("copy of %s does not match its recorded %s checksum", src, sum.Algo)
+	}
+	adopted, err := Place(part, dst, sum)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	rec.Adopted = rec.Adopted || adopted
-	if it.Action == ActCopy {
-		return removeFile(src)
+	leftovers = nil
+	if adopted {
+		rec.Adopted = true
+		leftovers = append(leftovers, part)
 	}
-	return nil
+	if moves {
+		leftovers = append(leftovers, src)
+	}
+	return leftovers, nil
+}
+
+// missing reports whether nothing exists at p.
+func missing(p string) (bool, error) {
+	_, err := os.Lstat(p)
+	if errors.Is(err, fs.ErrNotExist) {
+		return true, nil
+	}
+	return false, err
 }
 
 func removeFile(p string) error {

@@ -240,3 +240,38 @@ func TestReconcilePartials(t *testing.T) {
 		t.Fatalf("partials=%v", s.Partials)
 	}
 }
+
+// A crash after Place adopts a hand-uploaded file, but before the caller
+// saves the adoption, must not make the user's file look like cerberus's.
+func TestCrashAfterAdoptionNeverPrunesUserFile(t *testing.T) {
+	l := Layout{Mode: ModeDir, Root: t.TempDir()}
+	rel := "deb/x-2.0.iso"
+	write(t, l.Abs(rel), "iso 2.0")         // the user's own upload
+	write(t, l.Abs(rel)+".part", "iso 2.0") // cerberus's verified download
+	rec := recOf(rel, "iso 2.0", 0)
+	s := &State{Schema: 1, Entries: map[string]*EntryState{"deb": {}},
+		Pending: &Pending{Entry: "deb", Part: rel + ".part", File: rec}} // journal saved by the engine
+
+	adopted, err := Place(l.Abs(rel)+".part", l.Abs(rel), rec.Checksum())
+	if err != nil || !adopted {
+		t.Fatalf("Place: adopted=%v err=%v", adopted, err)
+	}
+	// The process dies here, before the engine records Adopted and saves.
+
+	if _, err := Reconcile(l, s, all); err != nil {
+		t.Fatal(err)
+	}
+	if exists(l.Abs(rel) + ".part") {
+		t.Error("Reconcile should remove the part file the adoption left")
+	}
+	newer := recOf("deb/x-3.0.iso", "iso 3.0", -24)
+	write(t, l.Abs(newer.Rel), "iso 3.0")
+	es := s.Entries["deb"]
+	es.Files = append([]FileRecord{newer}, es.Files...)
+	if _, err := Prune(l, es, 1, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !exists(l.Abs(rel)) {
+		t.Fatalf("prune deleted %s, the user's own upload", rel)
+	}
+}

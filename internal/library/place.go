@@ -27,9 +27,12 @@ var renameNoReplace = func(oldpath, newpath string) error {
 // Place renames the verified part file to dst without ever replacing an
 // existing file, using renameat2 RENAME_NOREPLACE where the filesystem
 // supports it, and otherwise a no-clobber check under the run lock. If dst
-// exists with checksum sum, Place removes the part file and reports
-// adopted. If dst exists and differs, it returns ErrExists and leaves both
-// files. It creates dst's folder (0755) if needed.
+// exists with checksum sum, Place reports adopted and leaves the part file
+// where it is: the caller saves state with the record marked Adopted, and
+// only then removes the part file, so a crash in between still shows both
+// files, which Reconcile and RunRelocation read as an adoption. If dst
+// exists and differs, it returns ErrExists and leaves both files. It
+// creates dst's folder (0755) if needed.
 func Place(part, dst string, sum verify.Checksum) (adopted bool, err error) {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return false, err
@@ -39,12 +42,12 @@ func Place(part, dst string, sum verify.Checksum) (adopted bool, err error) {
 	case err == nil:
 		return false, nil
 	case errors.Is(err, unix.EEXIST):
-		return adoptOrRefuse(part, dst, sum)
+		return adoptOrRefuse(dst, sum)
 	case errors.Is(err, unix.EINVAL), errors.Is(err, unix.ENOSYS), errors.Is(err, unix.EOPNOTSUPP):
 		// No RENAME_NOREPLACE here (NFS, for one). The run lock makes a
 		// check-then-rename safe against other cerberus runs.
 		if _, serr := os.Lstat(dst); serr == nil {
-			return adoptOrRefuse(part, dst, sum)
+			return adoptOrRefuse(dst, sum)
 		} else if !errors.Is(serr, fs.ErrNotExist) {
 			return false, serr
 		}
@@ -57,17 +60,15 @@ func Place(part, dst string, sum verify.Checksum) (adopted bool, err error) {
 }
 
 // adoptOrRefuse handles a dst that already exists: an identical regular
-// file is adopted and the part file removed, anything else is ErrExists.
-func adoptOrRefuse(part, dst string, sum verify.Checksum) (bool, error) {
+// file is adopted, with the part file left for the caller, and anything
+// else is ErrExists.
+func adoptOrRefuse(dst string, sum verify.Checksum) (bool, error) {
 	_, same, err := existing(dst, sum)
 	if err != nil {
 		return false, err
 	}
 	if !same {
 		return false, fmt.Errorf("%w: %s", ErrExists, dst)
-	}
-	if err := os.Remove(part); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return false, err
 	}
 	return true, nil
 }

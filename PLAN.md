@@ -1,6 +1,26 @@
 # cerberus build plan
 
-**Status (2026-11-21):** phases 0 to 5 are done. Next is phase 6, the independent review.
+**Status (2026-11-21):** all build phases (0 to 6) are done. Next, the owner tags v0.1 and tests on real hosts.
+- **Phase 6:** three independent Opus reviewers (data safety, security, Proxmox/CLI/README) reported 20 findings, 19 of them proven by failing tests. A separate agent fixed all of them, test first, and the lead re-verified the suite and the live checks.
+  - **High:** a crash right after adopting a hand-uploaded ISO could later get it pruned. Place now leaves the part file until state records the adoption.
+  - **Medium:**
+    - relocation stranded partials, wedged on hand-deleted files, ignored the free-space reserve, and checked PVE storage only once;
+    - state paths outside the library are now rejected at load;
+    - an unmounted share is refused (`ErrNoMarker`);
+    - downloads are held to their declared size;
+    - EndeavourOS and openmediavault now take version and checksum from the distro's own site, which closes a mirror replay;
+    - a sync that can't open the library now still alerts.
+  - **Low:**
+    - another program's `.part` file is left alone;
+    - the owner marker survives a same-folder mode switch;
+    - a journaled copy (`RelocItem.Copying`) keeps cerberus's own file prunable after a crash;
+    - a signature file is capped at 8 packets;
+    - ntfy no longer follows redirects;
+    - `schedule install` refuses a go-run binary;
+    - an NFS root_squash hint;
+    - `init --ntfy-topic-file`;
+    - the status mock matches real output.
+  - **Accepted:** two crash windows remain, both judged too narrow to journal. A crash between the save and the cleanup can leave one leftover file, but deletes nothing. An identical upload landing in the instant of a crashed copy would be treated as cerberus's own.
 - **Phase 4:** the real binary downloaded Alpine virt and Debian netinst from live mirrors. Both were verified: Alpine's ISO signature and Debian's signed SHA512SUMS. The status screen was right, a second sync downloaded nothing, and `location set` moved both by rename and rebuilt `latest/`.
   - The units pass `systemd-analyze verify`.
   - CI, the weekly catalog check and release workflows run on GitHub.

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -306,8 +307,21 @@ func TestCatalogCheckFailures(t *testing.T) {
 	}
 }
 
+// installedBinary makes the schedule run a file outside any temporary
+// folder, as an installed binary would be, instead of the test binary.
+func installedBinary(t *testing.T) string {
+	t.Helper()
+	bin, err := filepath.Abs("main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	swap(t, &executable, func() (string, error) { return bin, nil })
+	return bin
+}
+
 func TestScheduleCron(t *testing.T) {
 	r := newRig(t)
+	installedBinary(t)
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "etc/cron.d"), 0o755); err != nil {
 		t.Fatal(err)
@@ -478,5 +492,108 @@ func TestLastCheck(t *testing.T) {
 		if got := lastCheck(c.t, now); got != c.want {
 			t.Errorf("lastCheck(%v) = %q, want %q", c.t, got, c.want)
 		}
+	}
+}
+
+func TestInitNtfyTopicFileFlag(t *testing.T) {
+	r := newRig(t)
+	topic := filepath.Join(t.TempDir(), "my-topic")
+	if err := os.WriteFile(topic, []byte("secret-topic\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out := r.mustRun("init", "--dir", r.lib, "--no-schedule", "--yes", "--ntfy-topic-file", topic)
+	contains(t, out, "Alerts go to the ntfy topic in "+topic)
+	cfg, err := config.Load(r.config)
+	if err != nil || cfg.Ntfy.TopicFile != topic {
+		t.Fatalf("config topic file = %q, %v", cfg.Ntfy.TopicFile, err)
+	}
+	if data, _ := os.ReadFile(r.config); bytes.Contains(data, []byte("secret-topic")) || strings.Contains(out, "secret-topic") {
+		t.Error("the topic leaked into the config or the output")
+	}
+
+	bad := filepath.Join(t.TempDir(), "bad-topic")
+	if err := os.WriteFile(bad, []byte("not a topic!\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{bad, filepath.Join(t.TempDir(), "missing")} {
+		_, err := r.run("init", "--dir", r.lib, "--no-schedule", "--yes", "--ntfy-topic-file", path)
+		if err == nil || strings.Contains(err.Error(), "not a topic") {
+			t.Errorf("--ntfy-topic-file %s: %v", path, err)
+		}
+	}
+}
+
+// cannedRunner answers host commands from canned output, and systemctl
+// with nothing.
+type cannedRunner map[string]string
+
+func (c cannedRunner) Run(_ context.Context, name string, args ...string) ([]byte, error) {
+	cmd := strings.Join(append([]string{name}, args...), " ")
+	if out, ok := c[cmd]; ok {
+		return []byte(out), nil
+	}
+	if name == "systemctl" {
+		return nil, nil
+	}
+	return nil, fmt.Errorf("unexpected command %q", cmd)
+}
+
+func TestSyncAlertsWhenStorageInactive(t *testing.T) {
+	r := newRig(t)
+	var posts atomic.Int32
+	ntfy := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { posts.Add(1) }))
+	defer ntfy.Close()
+	swap(t, &http.DefaultClient, ntfy.Client())
+
+	topic := filepath.Join(t.TempDir(), "ntfy-topic")
+	if err := os.WriteFile(topic, []byte("secret-topic\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := fmt.Sprintf("mode: pve\nstorage: nfs\narch: amd64\nkeep: 1\nschedule: \"04:30\"\nntfy: {server: %q, topic_file: %q}\nselected: [{id: testos}]\n", ntfy.URL, topic)
+	if err := os.WriteFile(r.config, []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	swap(t, &detectHost, func(context.Context, string, host.Runner) (*host.Info, error) {
+		return &host.Info{Kind: host.KindPVE, Name: "Proxmox VE 9.0.3", Hostname: "pve", Node: "pve", MachineID: "m", Root: true, Systemd: true}, nil
+	})
+	swap(t, &newRunner, func() host.Runner {
+		return cannedRunner{"pvesh get /nodes/pve/storage --content iso --enabled 1 --output-format json": `[{"active":0,"content":"iso","enabled":1,"shared":1,"storage":"nfs","type":"nfs"}]`}
+	})
+
+	_, err := r.run("sync", "--quiet")
+	if err == nil {
+		t.Fatal("sync succeeded against an inactive storage")
+	}
+	if posts.Load() != 1 {
+		t.Errorf("sync failed (%v), but %d ntfy alerts were sent, want 1", err, posts.Load())
+	}
+}
+
+func TestScheduleInstallRefusesTemporaryBinary(t *testing.T) {
+	r := newRig(t)
+	r.initRig()
+	hostRoot := t.TempDir()
+	swap(t, &detectHost, func(context.Context, string, host.Runner) (*host.Info, error) {
+		return &host.Info{Kind: host.KindLinux, Hostname: "t", MachineID: "m", Root: true, Systemd: true, Suggestions: []string{"/srv/isos"}}, nil
+	})
+	swap(t, &newRunner, func() host.Runner { return cannedRunner{} })
+
+	// The test binary lives in a go-build folder under the temp dir, as a
+	// go run binary does.
+	_, err := r.run("schedule", "install", "--host-root", hostRoot)
+	if err == nil || !strings.Contains(err.Error(), "install the binary first") {
+		t.Errorf("schedule install from a temporary build: %v", err)
+	}
+	unit := filepath.Join(hostRoot, "etc/systemd/system/cerberus.service")
+	if _, err := os.Stat(unit); err == nil {
+		data, _ := os.ReadFile(unit)
+		t.Fatalf("the unit runs a temporary binary:\n%s", data)
+	}
+
+	// An installed binary is fine.
+	bin := installedBinary(t)
+	r.mustRun("schedule", "install", "--host-root", hostRoot)
+	if data, err := os.ReadFile(unit); err != nil || !strings.Contains(string(data), "ExecStart="+bin+" sync --quiet") {
+		t.Errorf("unit: %v\n%s", err, data)
 	}
 }

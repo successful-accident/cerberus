@@ -104,13 +104,13 @@
   homepage: https://www.openmediavault.org/
   arch: {amd64: amd64}
   steps:
-    # SourceForge's best_release.json carries only an md5, so this reads the project's file feed instead and
-    # takes the highest version.
-    - fetch: https://sourceforge.net/projects/openmediavault/rss?path=/iso
-      match: 'files/iso/(?P<version>\d+(?:\.\d+)+)/(?P<file>openmediavault_(?:\d+(?:\.\d+)+)-{arch}\.iso)/download'
+    # The versions and their sha256 come from openmediavault.org, which lists stable and oldstable. The
+    # .sha256 files on SourceForge are served by third-party mirrors, and an ISO signature covers only the
+    # bytes, so a mirror that supplied the checksum could replay an old signed ISO under a newer name.
+    - fetch: https://www.openmediavault.org/download.html
+      match: '(?s)href=https://sourceforge\.net/projects/openmediavault/files/iso/(?P<version>\d+(?:\.\d+)+)/(?P<file>openmediavault_\d+(?:\.\d+)+-{arch}\.iso)>.*?SHA256: (?P<sha256>[0-9a-f]{64})'
   url: https://sourceforge.net/projects/openmediavault/files/iso/{version}/{file}/download
   filename: openmediavault_{version}-{arch}.iso
-  checksum: {fetch: 'https://sourceforge.net/projects/openmediavault/files/iso/{version}/{file}.sha256/download'}
   signature: {type: detached-iso, url: 'https://sourceforge.net/projects/openmediavault/files/iso/{version}/{file}.asc/download'}
   keys: [openmediavault-iso]
   fingerprints:
@@ -118,9 +118,10 @@
   notes: >-
     Each release folder on SourceForge holds the ISO, a .sha256 file, a detached .asc signature and the public key
     (.key). The key file is that .key file. Its fingerprint, D675 06C8 78E0 8A94 FD7E 0094 2486 3F0C 716B 980B,
-    is printed under "The ISO images are signed with" on https://www.openmediavault.org/download.html, which also
-    prints the sha256 of the current stable ISO. The feed lists old major versions too, so the resolver's
-    version sort picks the newest.
+    is printed under "The ISO images are signed with" on https://www.openmediavault.org/download.html. That page
+    also names the stable and oldstable ISOs with their sha256, which is where the version and the checksum come
+    from; only the ISO and its signature come through SourceForge's mirrors. The resolver's version sort picks
+    stable.
 
 - id: talos
   name: Talos Linux

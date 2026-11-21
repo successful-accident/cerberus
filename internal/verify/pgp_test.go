@@ -5,6 +5,7 @@ import (
 	"crypto"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -336,5 +337,55 @@ func TestVerifyClearsigned(t *testing.T) {
 	}
 	if _, _, err := k.VerifyClearsigned(signedData); err == nil {
 		t.Fatal("unsigned document verified")
+	}
+}
+
+// readBytes returns how many bytes this process has read, from
+// /proc/self/io.
+func readBytes(t *testing.T) int64 {
+	t.Helper()
+	b, err := os.ReadFile("/proc/self/io")
+	if err != nil {
+		t.Skip("no /proc/self/io:", err)
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		if v, ok := strings.CutPrefix(line, "rchar: "); ok {
+			n, _ := strconv.ParseInt(v, 10, 64)
+			return n
+		}
+	}
+	t.Skip("no rchar in /proc/self/io")
+	return 0
+}
+
+func TestPaddedSignatureFileCannotForceRepeatedISOReads(t *testing.T) {
+	e := newEntity(t, nil)
+	k, err := NewKeyring([][]byte{pubArmored(t, e)}, []string{fpOf(e.PrimaryKey)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const size = 8 << 20
+	p := filepath.Join(t.TempDir(), "x.iso.part")
+	if err := os.WriteFile(p, bytes.Repeat([]byte{0x5a}, size), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stale := binarySig(t, e, []byte("an older release"), nil)
+
+	before := readBytes(t)
+	_, err = k.VerifyDetachedFile(p, bytes.Repeat(stale, 100))
+	read := readBytes(t) - before
+	if err == nil || !strings.Contains(err.Error(), "100 signatures") {
+		t.Fatalf("100 stale signatures: %v", err)
+	}
+	if read > MaxSignatures*size {
+		t.Fatalf("one 100-packet signature file made the verifier read the ISO %d times (%d MiB)", read/size, read>>20)
+	}
+	if _, err := k.CheckIssuer(bytes.Repeat(stale, MaxSignatures+1)); err == nil {
+		t.Error("CheckIssuer should refuse what a download would refuse")
+	}
+	// Up to the cap, the stale ones fail and a good one still passes.
+	good := binarySig(t, e, bytes.Repeat([]byte{0x5a}, size), nil)
+	if _, err := k.VerifyDetachedFile(p, append(bytes.Repeat(stale, MaxSignatures-1), good...)); err != nil {
+		t.Errorf("a good signature among %d: %v", MaxSignatures, err)
 	}
 }

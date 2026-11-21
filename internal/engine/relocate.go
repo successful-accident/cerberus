@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/successful-accident/cerberus/internal/download"
+	"github.com/successful-accident/cerberus/internal/host"
 	"github.com/successful-accident/cerberus/internal/library"
 )
 
@@ -31,7 +33,11 @@ func (e *Env) targetLayout(ctx context.Context, t Target) (library.Layout, error
 // Relocate moves the library to t, or finishes an unfinished move to t.
 // It saves the config as soon as the move is planned, so an interruption
 // leaves config and state pointing at the same unfinished move, and running
-// it again resumes. progress may be nil.
+// it again resumes. Copies must leave the free-space reserve on the target:
+// a move whose copies don't fit is refused before it starts, and each copy
+// checks again. Into a Proxmox storage, every file waits for a fresh check
+// that PVE reports the storage enabled and active. A failed check stops the
+// move with its journal intact. progress may be nil.
 func (s *Session) Relocate(ctx context.Context, t Target, files library.FileMode, takeOver bool,
 	progress func(item library.RelocItem, done, total int)) error {
 	env, st := s.Env, s.State
@@ -56,7 +62,7 @@ func (s *Session) Relocate(ctx context.Context, t Target, files library.FileMode
 			}
 		}
 		if err := library.ClaimOwner(to.Root, env.machineID(), takeOver); err != nil {
-			return err
+			return squashHint(err, to, t.Storage)
 		}
 		if st.Root == "" || len(st.Entries) == 0 {
 			// Nothing has been placed yet, so there's nothing to move.
@@ -75,6 +81,19 @@ func (s *Session) Relocate(ctx context.Context, t Target, files library.FileMode
 		if err != nil {
 			return err
 		}
+		var copies int64
+		for _, it := range plan.Items {
+			if it.Action == library.ActCopy || it.Action == library.ActCopyKeep {
+				for _, f := range st.Entries[it.Entry].Files {
+					if f.Rel == it.FromRel {
+						copies += f.Size
+					}
+				}
+			}
+		}
+		if err := s.checkSpace(to, copies); err != nil {
+			return err
+		}
 		st.Relocation = plan
 		if err := s.Save(); err != nil {
 			return err
@@ -88,8 +107,19 @@ func (s *Session) Relocate(ctx context.Context, t Target, files library.FileMode
 			env.logf("%s: %s, so it's copied and the original stays", it.FromRel, it.Reason)
 		}
 	}
-	if err := library.RunRelocation(st, s.Save, progress); err != nil {
-		return err
+	before := func(it library.RelocItem, rec library.FileRecord) error {
+		if to.Mode == library.ModePVE {
+			if _, err := host.PVEStorageReady(ctx, env.Run, env.Host.Node, t.Storage); err != nil {
+				return err
+			}
+		}
+		if it.Action == library.ActCopy || it.Action == library.ActCopyKeep {
+			return s.checkSpace(to, rec.Size)
+		}
+		return nil
+	}
+	if err := library.RunRelocation(st, s.Save, before, progress); err != nil {
+		return squashHint(err, to, t.Storage)
 	}
 	s.Layout = to
 	for id, es := range st.Entries {
@@ -104,7 +134,10 @@ func (s *Session) Relocate(ctx context.Context, t Target, files library.FileMode
 	// another host can use the folder later. In dir mode, also drop the
 	// folders the move emptied: os.Remove only removes an empty folder, so
 	// files left there in copy or leave mode stay put.
-	_ = os.Remove(filepath.Join(from.Root, library.OwnerFile))
+	// The same folder in the other mode is still the library.
+	if filepath.Clean(from.Root) != filepath.Clean(to.Root) {
+		_ = os.Remove(filepath.Join(from.Root, library.OwnerFile))
+	}
 	if from.Mode == library.ModeDir {
 		for id := range st.Entries {
 			_ = os.Remove(filepath.Join(from.Root, id))
@@ -112,6 +145,16 @@ func (s *Session) Relocate(ctx context.Context, t Target, files library.FileMode
 		_ = os.Remove(filepath.Join(from.Root, "latest"))
 	}
 	return nil
+}
+
+// checkSpace refuses copying need bytes into l when it would eat into the
+// free-space reserve.
+func (s *Session) checkSpace(l library.Layout, need int64) error {
+	if need <= 0 {
+		return nil
+	}
+	r := s.Env.Config.Reserve
+	return download.CheckSpace(l.Root, need, r.Percent, r.MinBytes())
 }
 
 func (s *Session) pointConfigAt(t Target) error {

@@ -4,6 +4,9 @@ import (
 	"cmp"
 	"fmt"
 	"os"
+	"path/filepath"
+	"slices"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -47,9 +50,37 @@ func (a *app) scheduleCmd() *cobra.Command {
 	return cmd
 }
 
+// executable returns the running binary's path; tests replace it.
+var executable = os.Executable
+
+// scheduleBinary returns the binary the schedule should run. It refuses a
+// temporary build, such as one from go run, which is deleted when it exits,
+// so the timer would fail every night.
+func scheduleBinary() (string, error) {
+	bin, err := executable()
+	if err != nil {
+		return "", err
+	}
+	if bin, err = filepath.EvalSymlinks(bin); err != nil {
+		return "", err
+	}
+	tmp := os.TempDir()
+	if t, err := filepath.EvalSymlinks(tmp); err == nil {
+		tmp = t
+	}
+	inTemp := strings.HasPrefix(bin, filepath.Clean(tmp)+string(filepath.Separator))
+	goBuild := slices.ContainsFunc(strings.Split(bin, string(filepath.Separator)), func(e string) bool {
+		return strings.HasPrefix(e, "go-build")
+	})
+	if inTemp || goBuild {
+		return "", fmt.Errorf("%s is a temporary build that's deleted when it exits; install the binary first, for example to /usr/local/bin/cerberus, and run schedule install from there", bin)
+	}
+	return bin, nil
+}
+
 // installSchedule installs the daily job and prints what it did.
 func (a *app) installSchedule(cmd *cobra.Command, info *host.Info, run host.Runner, at string) error {
-	bin, err := os.Executable()
+	bin, err := scheduleBinary()
 	if err != nil {
 		return err
 	}

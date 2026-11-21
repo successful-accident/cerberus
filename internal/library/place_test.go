@@ -43,8 +43,8 @@ func TestPlace(t *testing.T) {
 				if err != nil || !adopted {
 					t.Fatalf("adopted=%v err=%v", adopted, err)
 				}
-				if exists(part) || read(t, dst) != "iso bytes" {
-					t.Fatal("part should go, dst stay")
+				if !exists(part) || read(t, dst) != "iso bytes" {
+					t.Fatal("both files must stay: the caller removes the part file after saving the adoption")
 				}
 			})
 			t.Run("refuses a different file", func(t *testing.T) {

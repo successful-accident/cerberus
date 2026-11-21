@@ -65,6 +65,12 @@ func TestLoadStateRejects(t *testing.T) {
 		"other schema":   `{"schema":2,"entries":{}}`,
 		"missing schema": `{"entries":{}}`,
 		"not json":       `nope`,
+		"file outside":   `{"schema":1,"entries":{"a":{"files":[{"version":"1","rel":"../victim.iso","algo":"sha256","hash":"","size":0,"added":"2026-01-01T00:00:00Z"}]}}}`,
+		"absolute file":  `{"schema":1,"entries":{"a":{"files":[{"version":"1","rel":"/etc/passwd","algo":"sha256","hash":"","size":0,"added":"2026-01-01T00:00:00Z"}]}}}`,
+		"kept outside":   `{"schema":1,"entries":{"a":{"files":[],"kept":[{"rel":"../x.iso","reason":"r"}]}}}`,
+		"pending part":   `{"schema":1,"entries":{},"pending":{"entry":"a","part":"../x.part","file":{"version":"1","rel":"a/x.iso","algo":"sha256","hash":"","size":0,"added":"2026-01-01T00:00:00Z"}}}`,
+		"partial key":    `{"schema":1,"entries":{},"partials":{"../x.iso.part":{"entry":"a","version":"1","url":""}}}`,
+		"move item":      `{"schema":1,"entries":{},"relocation":{"from_mode":"dir","from_root":"/a","to_mode":"dir","to_root":"/b","files":"move","items":[{"entry":"a","from_rel":"a/x.iso","to_rel":"../x.iso","action":"rename","done":false}]}}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			p := filepath.Join(t.TempDir(), "state.json")

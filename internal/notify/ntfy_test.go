@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -144,5 +145,33 @@ func TestTopicFileWarning(t *testing.T) {
 	}
 	if got := TopicFileWarning(filepath.Join(dir, "missing")); got != "" {
 		t.Errorf("missing: got %q", got)
+	}
+}
+
+func TestSendRefusesRedirectToPlainHTTP(t *testing.T) {
+	var leaked atomic.Value
+	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		leaked.Store(r.URL.Path)
+	}))
+	defer plain.Close()
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, plain.URL+r.URL.Path, http.StatusMovedPermanently)
+	}))
+	defer srv.Close()
+	file := filepath.Join(t.TempDir(), "topic")
+	if err := os.WriteFile(file, []byte("secret-topic\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	client := srv.Client()
+	n := &Ntfy{Server: srv.URL, TopicFile: file, Client: client}
+	err := n.Send(context.Background(), Message{Body: "1 updated"})
+	if p := leaked.Load(); p != nil {
+		t.Fatalf("followed a redirect to http:// and sent %s in plaintext", p)
+	}
+	if err == nil || strings.Contains(err.Error(), "secret-topic") {
+		t.Errorf("a redirect should be an error that hides the topic: %v", err)
+	}
+	if client.CheckRedirect != nil {
+		t.Error("Send modified the caller's client")
 	}
 }

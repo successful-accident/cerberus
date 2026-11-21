@@ -69,7 +69,8 @@ func NewKeyring(keys [][]byte, fingerprints []string) (*Keyring, error) {
 // armored, and an armored sig may hold several signature blocks. It passes
 // if any block is a valid signature by an allowed key (the primary key or
 // signing subkey whose fingerprint is allowed), and returns that
-// fingerprint. Expired, revoked, or weak-hash signatures fail.
+// fingerprint. Expired, revoked, or weak-hash signatures fail, and so does
+// a sig with more than MaxSignatures signature packets.
 func (k *Keyring) VerifyDetached(data, sig []byte) (string, error) {
 	return k.verify(sig, func() (io.ReadCloser, error) {
 		return io.NopCloser(bytes.NewReader(data)), nil
@@ -78,14 +79,16 @@ func (k *Keyring) VerifyDetached(data, sig []byte) (string, error) {
 
 // VerifyDetachedFile is VerifyDetached over the file at path, which it
 // re-reads for each signature block, so a multi-gigabyte ISO never sits in
-// memory.
+// memory. MaxSignatures bounds how often a hostile signature file can make
+// it read the ISO.
 func (k *Keyring) VerifyDetachedFile(path string, sig []byte) (string, error) {
 	return k.verify(sig, func() (io.ReadCloser, error) { return os.Open(path) })
 }
 
 // VerifyClearsigned verifies a clearsigned document and returns only its
 // signed plaintext, plus the allowed fingerprint that signed it. Text before
-// the BEGIN line or after the signature is never returned.
+// the BEGIN line or after the signature is never returned. More than
+// MaxSignatures signature packets fail.
 func (k *Keyring) VerifyClearsigned(doc []byte) (plaintext []byte, fingerprint string, err error) {
 	block, _ := clearsign.Decode(doc)
 	if block == nil {
@@ -116,15 +119,16 @@ type sigPacket struct {
 // names as its signer, without the signed data. It doesn't verify the
 // signature cryptographically; that happens at download time with
 // VerifyDetachedFile. It catches what a catalog check can see in advance: a
-// missing or unreadable signature file, a weak hash, and a distro that has
-// moved to a key the entry doesn't pin.
+// missing or unreadable signature file, a weak hash, more than
+// MaxSignatures signatures, and a distro that has moved to a key the entry
+// doesn't pin.
 func (k *Keyring) CheckIssuer(sig []byte) (string, error) {
 	sigs, err := sigPackets(sig)
 	if err != nil {
 		return "", err
 	}
-	if len(sigs) == 0 {
-		return "", errors.New("no signatures found")
+	if err := countSignatures(sigs); err != nil {
+		return "", err
 	}
 	var fails []string
 	for i, s := range sigs {
@@ -175,11 +179,27 @@ func (k *Keyring) verify(sig []byte, open func() (io.ReadCloser, error)) (string
 	return k.verifyPackets(sigs, open)
 }
 
+// MaxSignatures is the most signature packets one signature accepts. Each
+// packet by a pinned key costs a full read of the signed data, so padding a
+// file with stale signatures would otherwise make a verify read a
+// multi-gigabyte ISO thousands of times. The catalog's most is two.
+const MaxSignatures = 8
+
+func countSignatures(sigs []sigPacket) error {
+	switch {
+	case len(sigs) == 0:
+		return errors.New("no signatures found")
+	case len(sigs) > MaxSignatures:
+		return fmt.Errorf("%d signatures in one file; more than %d is refused", len(sigs), MaxSignatures)
+	}
+	return nil
+}
+
 // verifyPackets passes when any packet is a valid signature by an allowed
 // key, and otherwise reports every packet's failure.
 func (k *Keyring) verifyPackets(sigs []sigPacket, open func() (io.ReadCloser, error)) (string, error) {
-	if len(sigs) == 0 {
-		return "", errors.New("no signatures found")
+	if err := countSignatures(sigs); err != nil {
+		return "", err
 	}
 	var fails []string
 	for i, s := range sigs {

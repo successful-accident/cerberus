@@ -2,6 +2,7 @@ package main
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -85,6 +86,12 @@ func (a *app) sync(cmd *cobra.Command, o syncOpts) error {
 	} else {
 		s, err := engine.Open(ctx, env, engine.OpenOptions{TakeOver: o.takeOver})
 		if err != nil {
+			// A run that can't even start, such as on an inactive storage,
+			// is a failure the owner needs to hear about. Another sync
+			// holding the lock isn't.
+			if !errors.Is(err, library.ErrLocked) {
+				a.notifyReport(cmd, cfg, env.Host, &engine.Report{Stopped: err})
+			}
 			return err
 		}
 		defer s.Close()

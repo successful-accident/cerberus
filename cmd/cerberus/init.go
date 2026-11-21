@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
@@ -32,6 +33,7 @@ type initOpts struct {
 	arch, at     string
 	noSchedule   bool
 	sync, yes    bool
+	topicFile    string
 }
 
 func defaultArch() string {
@@ -63,6 +65,7 @@ func (a *app) initCmd() *cobra.Command {
 	f.BoolVar(&o.noSchedule, "no-schedule", false, "don't install the daily sync")
 	f.BoolVar(&o.sync, "sync", false, "run the first sync when setup ends")
 	f.BoolVar(&o.yes, "yes", false, "don't ask; accept the defaults")
+	f.StringVar(&o.topicFile, "ntfy-topic-file", "", "send ntfy alerts to the topic in this existing file (mode 0600), so the topic never goes on the command line")
 	return cmd
 }
 
@@ -73,6 +76,23 @@ func validTopic(s string) error {
 		return errors.New("use 1 to 64 letters, digits, - or _")
 	}
 	return nil
+}
+
+// checkTopicFile returns the absolute path of an existing ntfy topic file
+// that holds a valid topic. Its errors never include the file's contents.
+func checkTopicFile(path string) (string, error) {
+	path, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("--ntfy-topic-file: %w", err)
+	}
+	if validTopic(strings.TrimSpace(string(raw))) != nil {
+		return "", fmt.Errorf("--ntfy-topic-file %s must hold one topic: 1 to 64 letters, digits, - or _", path)
+	}
+	return path, nil
 }
 
 func validKeep(s string) error {
@@ -107,6 +127,12 @@ func (a *app) runInit(cmd *cobra.Command, o initOpts) error {
 	}
 	if !slices.Contains(catalog.Architectures, o.arch) {
 		return fmt.Errorf("--arch must be one of %v", catalog.Architectures)
+	}
+	if o.topicFile != "" {
+		var err error
+		if o.topicFile, err = checkTopicFile(o.topicFile); err != nil {
+			return err
+		}
 	}
 	cat, err := a.loadCatalog()
 	if err != nil {
@@ -150,6 +176,9 @@ func (a *app) runInit(cmd *cobra.Command, o initOpts) error {
 	cfg := config.New(o.arch)
 	cfg.Mode, cfg.Dir, cfg.Storage, cfg.Keep = tgt.Mode, tgt.Dir, tgt.Storage, keep
 	cfg.Schedule = cmp.Or(o.at, cfg.Schedule)
+	if o.topicFile != notify.DefaultTopicFile {
+		cfg.Ntfy.TopicFile = o.topicFile
+	}
 	cfg.Add(ids...)
 	if err := cfg.Save(a.configPath); err != nil {
 		return err
@@ -172,7 +201,13 @@ func (a *app) runInit(cmd *cobra.Command, o initOpts) error {
 			}
 		}
 	}
-	if ask {
+	switch {
+	case o.topicFile != "":
+		fmt.Fprintf(out, "Alerts go to the ntfy topic in %s.\n", o.topicFile)
+		if w := notify.TopicFileWarning(o.topicFile); w != "" {
+			fmt.Fprintln(cmd.ErrOrStderr(), w)
+		}
+	case ask:
 		if err := a.offerNtfy(cmd, u, cfg, info); err != nil {
 			return err
 		}

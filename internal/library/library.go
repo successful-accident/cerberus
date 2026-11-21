@@ -135,7 +135,12 @@ type RelocItem struct {
 	ToRel   string `json:"to_rel"`
 	Action  string `json:"action"`
 	Reason  string `json:"reason,omitempty"` // why copy-keep or skip
-	Done    bool   `json:"done"`
+	// Copying marks a copy whose <dst>.part cerberus has started to write.
+	// It is saved before the first byte, so on resume the part file is
+	// known to be cerberus's, and a destination with no part file left is
+	// cerberus's own placed copy, not a file that was already there.
+	Copying bool `json:"copying,omitempty"`
+	Done    bool `json:"done"`
 }
 
 // Relocation journals a move of the library between locations, so an

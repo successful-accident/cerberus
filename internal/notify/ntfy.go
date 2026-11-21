@@ -37,8 +37,10 @@ type Message struct {
 }
 
 // Send reads the topic, which must match ^[-_A-Za-z0-9]{1,64}$, and POSTs
-// m.Body to <Server>/<topic> with Title, Tags and Priority headers. A
-// non-2xx reply is an error. Errors name the server but never the topic.
+// m.Body to <Server>/<topic> with Title, Tags and Priority headers. It never
+// follows a redirect, which could carry the topic to plain HTTP or another
+// host; the redirect, like any non-2xx reply, is an error. Errors name the
+// server but never the topic.
 func (n *Ntfy) Send(ctx context.Context, m Message) error {
 	server := strings.TrimRight(n.Server, "/")
 	if server == "" {
@@ -75,10 +77,11 @@ func (n *Ntfy) Send(ctx context.Context, m Message) error {
 	if m.Priority > 0 {
 		req.Header.Set("Priority", strconv.Itoa(m.Priority))
 	}
-	client := n.Client
-	if client == nil {
-		client = http.DefaultClient
+	client := *http.DefaultClient
+	if n.Client != nil {
+		client = *n.Client
 	}
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	resp, err := client.Do(req)
 	if err != nil {
 		return scrub(err)

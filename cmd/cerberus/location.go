@@ -119,7 +119,11 @@ func (a *app) locationSet(cmd *cobra.Command, o locationOpts) error {
 	defer s.Close()
 	verbs := map[string]string{library.ActRename: "renamed", library.ActCopy: "moved", library.ActCopyKeep: "copied", library.ActSkip: "left"}
 	err = s.Relocate(ctx, tgt, mode, o.takeOver, func(it library.RelocItem, done, total int) {
-		fmt.Fprintf(con, "[%d/%d] %s %s\n", done, total, verbs[it.Action], it.FromRel)
+		line := fmt.Sprintf("[%d/%d] %s %s", done, total, verbs[it.Action], it.FromRel)
+		if it.Action == library.ActSkip && it.Reason != "" {
+			line += " (" + it.Reason + ")"
+		}
+		fmt.Fprintln(con, line)
 	})
 	if err != nil {
 		return err
