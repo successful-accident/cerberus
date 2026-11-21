@@ -17,11 +17,11 @@
 <br>
 
 cerberus keeps a library of Linux installer ISOs current. You pick distros
-from a catalog sorted by use case. Then, on a schedule, it checks each one
-for a new release, downloads it, checks its checksum and signature, and only
-then lets it into the library. On a Proxmox VE host, the ISOs go into a
-storage you choose and show up in the VM wizard. Anywhere else, they go in a
-folder you choose.
+from a catalog sorted by use case. Then, on a schedule, cerberus checks each
+one for a new release and downloads it. It checks the checksum and signature,
+and only then adds the ISO to the library. On a Proxmox VE host, the ISOs go
+into a storage you choose and show up in the VM wizard. Anywhere else, they go
+in a folder you choose.
 
 > **Pre-release.** cerberus is being built now, and this page describes v0.1
 > as designed. The install command works once the first release is tagged.
@@ -63,8 +63,8 @@ folder you choose.
 </picture>
 
 Every selected distro goes through the same five steps. If a check fails,
-cerberus deletes the download and keeps the version you already had, so a
-bad mirror or a half-published release never costs you a working ISO. The
+cerberus deletes the download and keeps the version you already had. A bad
+mirror or a half-published release never costs you a working ISO. The
 failure shows on the status screen and, if you've set it up, in an ntfy alert.
 
 ## What it looks like
@@ -120,8 +120,8 @@ each Samba or NFS share it finds. Each distro gets its own subfolder, and
 `latest/` holds a link to the newest ISO of each.
 
 To change the folder later, run `cerberus location set <dir>`. On the same
-disk, the files are just renamed. Otherwise each file is copied, checked, and
-then removed from the old folder.
+disk, cerberus just renames the files. Otherwise it copies each file, checks
+it, and then removes it from the old folder.
 
 </td>
 </tr>
@@ -144,8 +144,9 @@ then removed from the old folder.
 
 ## The catalog
 
-About 40 distros in nine groups, as 45 catalog entries. A few distros have
-a separate arm64 entry, because they publish it on a different host.
+The catalog has about 40 distros in nine groups, written as 45 entries. A few
+distros have a separate arm64 entry, because they publish it on a different
+host.
 `cerberus catalog` prints the current list.
 
 | Use case | Distros |
@@ -160,8 +161,8 @@ a separate arm64 entry, because they publish it on a different host.
 | Lightweight | Alpine Linux (standard and virt), MX Linux, Void Linux |
 | DIY and rolling | Arch Linux, Gentoo, NixOS, openSUSE Tumbleweed |
 
-Every ISO is checked against its distro's published checksum. Most entries
-also verify the distro's OpenPGP signature. The exceptions:
+cerberus checks every ISO against its distro's published checksum. Most
+entries also verify the distro's OpenPGP signature. The exceptions:
 - Pop!_OS, CentOS Stream, Bazzite, Talos, Rescuezilla, ShredOS,
   netboot.xyz, Void and NixOS publish no OpenPGP signature.
 - XCP-ng signs with SHA-1, which cerberus rejects.
@@ -190,17 +191,18 @@ cerberus:
 ## Schedule and alerts
 
 `cerberus schedule install` sets up a systemd timer that syncs daily at
-04:30, plus up to an hour of random delay so mirrors aren't hit on the hour.
-If the host was off at sync time, the run happens after the next boot.
+04:30. The timer adds up to an hour of random delay, so mirrors aren't all hit
+on the hour. If the host was off at sync time, the sync runs after the next
+boot.
 `--at 02:15` picks a different time. Without systemd, it writes
 `/etc/cron.d/cerberus` instead.
 
 For alerts, put an [ntfy](https://ntfy.sh) topic in
 `/etc/cerberus/ntfy-topic` with mode 0600, or point
 `cerberus init --ntfy-topic-file` at a file you keep elsewhere. cerberus
-sends a summary whenever a sync updates or fails something, including a sync
-that can't start, such as on an unmounted storage. The topic never goes in
-the config file or the logs, because anyone who knows it can read your
+sends a summary whenever a sync updates or fails something. That includes a
+sync that can't start, such as on an unmounted storage. The topic never goes
+in the config file or the logs, because anyone who knows it can read your
 alerts.
 
 ## Add a distro
@@ -222,8 +224,8 @@ replaces it. This one finds the newest Ubuntu LTS:
   url: https://releases.ubuntu.com/{version}/{file}
 ```
 
-Each step fetches a page and pulls candidates out of it. It uses a regex,
-or a jq program for JSON and YAML feeds. Named groups become variables for
+Each step fetches a page and pulls candidates out of it. It uses a regex
+(regular expression), or a jq program for JSON and YAML feeds. Named groups become variables for
 later steps, and the highest `version` wins. A step can also read a redirect
 target or a header, skip betas with `exclude:`, or verify a clearsigned
 checksum file. Then test it:

@@ -58,7 +58,7 @@ cerberus keeps a library of Linux ISOs current:
 
 It finds out what kind of host it's on:
 - **Proxmox VE:** new ISOs go into a PVE storage's ISO folder, so they show up in the VM wizard.
-- **Anywhere else:** it asks for a folder, suggesting one under each Samba or NFS share it finds. The folder can be changed later, and the files are moved or copied, whichever fits.
+- **Anywhere else:** it asks for a folder, suggesting one under each Samba or NFS share it finds. You can change the folder later, and cerberus moves or copies the files, whichever fits.
 
 ## Decisions
 
@@ -72,7 +72,7 @@ It finds out what kind of host it's on:
   - go.yaml.in/yaml/v3 v3.0.6
   - golang.org/x/sys
 - **License:** GPL-3.0. All the dependency licenses are compatible.
-- **Release assets:** `cerberus-linux-amd64`, `cerberus-linux-arm64` and `SHA256SUMS`, which the README's install command relies on.
+- **Release assets:** `cerberus-linux-amd64`, `cerberus-linux-arm64` and `SHA256SUMS`, which the README's install command uses.
 - **v1 scope:**
   - catalog, sync, status screen, retention, Proxmox registration, host detection, and changing the ISO location;
   - signature verification;
@@ -84,7 +84,7 @@ It finds out what kind of host it's on:
   - The listing is `<$path/*>`: flat, it follows symlinks, it counts only `.iso` and `.img`, and it ignores dotfiles and `.part` files.
   - `pvesm path` resolves files that don't exist yet and honors `content-dirs`, but never mounts anything.
   - PVE's delete never checks whether a VM uses the ISO.
-- **Changing location:** use rename on the same filesystem. Otherwise go one file at a time: copy, verify against the stored sha256, rename, delete the source. An interrupted move resumes. There's no rsync dependency.
+- **Changing location:** use rename on the same filesystem. Otherwise go one file at a time: copy, verify against the stored sha256, rename, delete the source. An interrupted move resumes. cerberus doesn't depend on rsync.
 - **Repo About box:** the sandbox proxy refuses repo-settings writes, so the owner sets the description and topics.
 
 ## Behavior
@@ -103,7 +103,7 @@ It finds out what kind of host it's on:
 - One row per distro: name, version on disk, last check, status, size and versions kept.
 - A footer with three numbers: space cerberus manages, other files in the folder, and free space with the reserve.
 
-On a TTY, a menu follows: Sync now, Check only, Choose distros, Settings, Quit. When piped, or with `--plain`, it prints and exits. Every interactive step also has flags.
+On a TTY (an interactive terminal), a menu follows: Sync now, Check only, Choose distros, Settings, Quit. When piped, or with `--plain`, it prints and exits. Every interactive step also has flags.
 
 | Command | Does |
 |---|---|
@@ -154,7 +154,7 @@ Running out of disk space stops the whole run. Resolving runs 8 at a time, and d
 | anything else | Linux (`/etc/os-release`) | `/srv/isos` | systemd; without it, `/etc/cron.d`; else printed steps |
 
 **Proxmox details:**
-- **Finding storages:** `pvesh get /nodes/<node>/storage --content iso --enabled 1 --output-format json`, requiring `active: 1`. This runs again before every write, because an unmounted NFS storage would otherwise send ISOs to the boot disk.
+- **Finding storages:** `pvesh get /nodes/<node>/storage --content iso --enabled 1 --output-format json`, requiring `active: 1`. cerberus runs this check again before every write, because an unmounted NFS storage would otherwise send ISOs to the boot disk.
 - **ISO folder:** `dirname $(pvesm path <storage>:iso/cerberus-probe.iso)`.
 - **In-use guard:** scan `/etc/pve/nodes/*/qemu-server/*.conf` for `<storage>:iso/<file>`, snapshot sections included. Prune skips those files and shows "kept: in use by VM 105". Changing storage copies those files instead of moving them.
 - **Requirements:** Proxmox mode requires root. A permission error on NFS names root_squash as the likely cause.
@@ -165,8 +165,8 @@ Running out of disk space stops the whole run. Resolving runs 8 at a time, and d
 - `--at` changes the time.
 
 **ntfy:**
-- A POST goes to `<server>/<topic>`. The topic is read at send time from a mode-0600 file (default `/etc/cerberus/ntfy-topic`), with a warning if the file is readable by others.
-- A message goes out only when a sync updates or fails something.
+- cerberus sends a POST to `<server>/<topic>`. It reads the topic at send time from a mode-0600 file (default `/etc/cerberus/ntfy-topic`), and warns if others can read the file.
+- It sends a message only when a sync updates or fails something.
 
 **Files:**
 - **Config:** `/etc/cerberus/config.yaml` as root, else `$XDG_CONFIG_HOME/cerberus/`.
@@ -189,7 +189,7 @@ Running out of disk space stops the whole run. Resolving runs 8 at a time, and d
 
 ## Architecture
 
-The exported types and signatures in each package are the contract between build lanes. Its doc comments are the spec.
+The exported types and signatures in each package are the contract between build lanes. Their doc comments are the spec.
 
 | Package | Owns |
 |---|---|
@@ -224,7 +224,7 @@ Ubuntu Server LTS resolves to 26.04.1 against the live feed:
   fingerprints: [<confirmed in phase 3>]
 ```
 
-Each step fetches a URL and extracts candidates with either `match:` (a regex) or `jq:` (for JSON and YAML feeds, with variables as `$name`). Every named capture becomes a variable for later steps.
+Each step fetches a URL and extracts candidates with either `match:` (a regular expression) or `jq:` (for JSON and YAML feeds, with variables as `$name`). Every named capture becomes a variable for later steps.
 
 Step options:
 - **`from:`** chooses what the step reads: `body` (the default), `final-url`, `header:<Name>`, or `last-modified`.
@@ -276,7 +276,7 @@ With a pin, every step that captures `version` drops candidates that don't match
    - a non-root run using XDG paths, and Proxmox mode as non-root refused clearly;
    - one ntfy summary arriving at a fake server.
 
-3. **Catalog:** about 6 agents, one per use-case group, write the entries. An independent agent confirms every pinned fingerprint against the distro's official HTTPS page. Leads:
+3. **Catalog:** about 6 agents, one per use-case group, write the entries. An independent agent confirms every pinned fingerprint against the distro's official HTTPS page. Starting points:
    - NixOS: the channel comes from the nix-releases S3 listing.
    - CachyOS: `mirror.cachyos.org/ISO/desktop/<YYMMDD>/`.
    - SystemRescue: checksums and `.asc` from system-rescue.org.
@@ -308,6 +308,6 @@ With a pin, every step that captures `version` drops candidates that don't match
 
    *Check:* every command shown exists in `--help`, and every link and path resolves.
 
-6. **Independent review:** separate reviewers cover data safety, security, and Proxmox and host integration with CLI UX and README accuracy. Their fixes get applied.
+6. **Independent review:** separate reviewers cover data safety, security, and Proxmox and host integration with CLI UX and README accuracy. Apply their fixes.
 
    *Check:* every finding is fixed or answered here, and `go test ./...` passes.
