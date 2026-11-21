@@ -736,10 +736,13 @@ func TestRelocate(t *testing.T) {
 			}
 			oldISO := filepath.Join(oldDir, "testos", isoName("1.0"))
 			newISO := filepath.Join(newDir, "testos", isoName("1.0"))
+			wantGone(t, filepath.Join(oldDir, library.OwnerFile))
+			wantGone(t, filepath.Join(oldDir, "latest"))
 			switch mode {
 			case library.FilesMove:
 				wantFile(t, newISO, isoBody("1.0"))
 				wantGone(t, oldISO)
+				wantGone(t, filepath.Dir(oldISO))
 			case library.FilesCopy:
 				wantFile(t, newISO, isoBody("1.0"))
 				wantFile(t, oldISO, isoBody("1.0"))

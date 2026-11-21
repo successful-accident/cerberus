@@ -100,6 +100,17 @@ func (s *Session) Relocate(ctx context.Context, t Target, files library.FileMode
 			}
 		}
 	}
+	// cerberus no longer manages the old location. Drop its owner marker, so
+	// another host can use the folder later. In dir mode, also drop the
+	// folders the move emptied: os.Remove only removes an empty folder, so
+	// files left there in copy or leave mode stay put.
+	_ = os.Remove(filepath.Join(from.Root, library.OwnerFile))
+	if from.Mode == library.ModeDir {
+		for id := range st.Entries {
+			_ = os.Remove(filepath.Join(from.Root, id))
+		}
+		_ = os.Remove(filepath.Join(from.Root, "latest"))
+	}
 	return nil
 }
 
