@@ -1,0 +1,104 @@
+# Security and privacy distros: Kali, Parrot, Tails and Qubes OS. The entry
+# format is documented in internal/catalog.
+
+- id: kali-installer
+  name: Kali Linux (installer)
+  category: security
+  description: Penetration-testing distro, installer image with the default tool set.
+  homepage: https://www.kali.org/get-kali/
+  arch: {amd64: amd64, arm64: arm64}
+  steps:
+    - fetch: https://cdimage.kali.org/current/SHA256SUMS
+      match: '(?m)^(?P<sha256>[0-9a-f]{64})  (?P<file>kali-linux-(?P<version>\d{4}\.\d+)-installer-{arch}\.iso)$'
+  url: https://cdimage.kali.org/current/{file}
+  signature: {type: detached-checksums, url: 'https://cdimage.kali.org/current/SHA256SUMS.gpg'}
+  keys: [kali-archive]
+  fingerprints: [827C8569F2518CC677FECA1AED65462EC8D5E4C5]
+  notes: >-
+    Key 827C8569F2518CC677FECA1AED65462EC8D5E4C5 (Kali Linux Archive
+    Automatic Signing Key (2025), expires 2028-04-17) was downloaded from
+    https://archive.kali.org/archive-key.asc and its fingerprint confirmed on
+    https://www.kali.org/docs/introduction/download-official-kali-linux-images/.
+    It replaced the earlier archive key in 2025 and signs the current
+    SHA256SUMS.gpg. The current/ path redirects to a mirror, so the signature
+    is what vouches for the file list. Kali's key will rotate again before
+    2028; a signature failure after a rotation means this entry needs the new
+    key.
+
+- id: parrot-security
+  name: Parrot Security
+  category: security
+  description: Debian-based security and privacy distro with penetration-testing tools.
+  homepage: https://parrotsec.org/download/
+  arch: {amd64: amd64, arm64: arm64}
+  steps:
+    - fetch: https://deb.parrot.sh/parrot/iso/
+      match: 'href="(?P<version>\d+\.\d+(?:\.\d+)?)/"'
+    - fetch: https://deb.parrot.sh/parrot/iso/{version}/signed-hashes.txt
+      clearsigned: true
+      match: '(?m)^(?P<sha512>[0-9a-f]{128})  (?P<file>Parrot-security-{version}_{arch}\.iso)$'
+  url: https://deb.parrot.sh/parrot/iso/{version}/{file}
+  keys: [parrot-archive]
+  fingerprints: [B711822346552E4D92DA02DF7A8286AF0E81EE4A]
+  notes: >-
+    Key B711822346552E4D92DA02DF7A8286AF0E81EE4A (Parrot Project (2024-2026),
+    expires 2028-11-03) was downloaded from
+    https://deb.parrot.sh/parrot/misc/parrotsec.gpg and its fingerprint
+    confirmed on
+    https://parrotsec.org/docs/configuration/hash-and-key-verification/. It
+    signs signed-hashes.txt. The listing also holds beta/, caine/ and
+    latest/ folders, which the version pattern skips. A release can ship
+    without an arm64 ISO, in which case the resolver falls back to the
+    previous release.
+
+- id: tails
+  name: Tails
+  category: security
+  description: Amnesic live system that routes everything through Tor.
+  homepage: https://tails.net/install/
+  arch: {amd64: amd64}
+  steps:
+    - fetch: https://tails.net/install/v2/Tails/{arch}/stable/latest.json
+      jq: '.installations[] | .version as $v | ."installation-paths"[] | select(.type == "iso") | ."target-files"[] | {version: $v, url: .url, sha256: .sha256}'
+  url: '{url}'
+  signature: {type: detached-iso, url: 'https://tails.net/torrents/files/{filename}.sig'}
+  keys: [tails-signing]
+  fingerprints: [A490D0F4D311A4153E2BB7CADBB802B258ACD84F]
+  notes: >-
+    The feed is Tails's own installation metadata, and it carries the sha256.
+    Key A490D0F4D311A4153E2BB7CADBB802B258ACD84F (Tails developers) was
+    downloaded from https://tails.net/tails-signing.key and its fingerprint
+    confirmed on https://tails.net/doc/about/openpgp_keys/. The ISO
+    signature is made by a current signing subkey of that key. Tails
+    publishes no arm64 image. The download URL redirects to a mirror, which
+    is why the checksum and the signature both come from tails.net.
+
+- id: qubes
+  name: Qubes OS
+  category: security
+  description: Security-focused desktop that isolates apps in Xen virtual machines.
+  homepage: https://www.qubes-os.org/downloads/
+  arch: {amd64: x86_64}
+  steps:
+    - fetch: https://mirrors.edge.kernel.org/qubes/iso/
+      match: 'href="Qubes-R(?P<version>\d+\.\d+(?:\.\d+)?)-{arch}\.iso"'
+    - fetch: https://mirrors.edge.kernel.org/qubes/iso/Qubes-R{version}-{arch}.iso.DIGESTS
+      match: '(?m)^(?P<sha512>[0-9a-f]{128}) \*(?P<file>Qubes-R{version}-{arch}\.iso)$'
+  url: https://mirrors.edge.kernel.org/qubes/iso/{file}
+  signature: {type: detached-checksums, url: 'https://mirrors.edge.kernel.org/qubes/iso/Qubes-R{version}-{arch}.iso.DIGESTS.asc'}
+  keys: [qubes-release-4.3]
+  fingerprints: [F3FA3F99D6281F7B3A3E5E871C3D9B627F3FADA4]
+  notes: >-
+    Key F3FA3F99D6281F7B3A3E5E871C3D9B627F3FADA4 (Qubes OS Release 4.3 Signing
+    Key) was downloaded from
+    https://keys.qubes-os.org/keys/qubes-release-4.3-signing-key.asc. No
+    official page lists this release-key fingerprint. It is confirmed through
+    the project's documented chain of trust instead: the key carries a
+    certification by the Qubes Master Signing Key
+    427F11FD0FAA4B080123F01CDDFA1A3E36879494, whose fingerprint is
+    published on
+    https://doc.qubes-os.org/en/latest/project-security/verifying-signatures.html.
+    The key signs the DIGESTS.asc of 4.3.x releases. Each Qubes release
+    series has its own release key, so 4.4 will need a new key here.
+    kernel.org hosts the official mirror of the ISOs. Release candidates
+    don't match the version pattern.

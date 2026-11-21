@@ -1,0 +1,198 @@
+# Rescue and lightweight distros. The entry format is documented in
+# internal/catalog.
+
+- id: alpine-virt
+  name: Alpine Linux (virt)
+  category: lightweight
+  description: Alpine with a slimmed-down kernel for virtual machines.
+  homepage: https://alpinelinux.org/downloads/
+  arch: {amd64: x86_64, arm64: aarch64}
+  steps:
+    - fetch: https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/{arch}/latest-releases.yaml
+      jq: '.[] | select(.flavor == "alpine-virt") | {version, file: .iso, sha256}'
+  url: https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/{arch}/{file}
+  signature: {type: detached-iso, url: 'https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/{arch}/{filename}.asc'}
+  keys: [alpine-signing]
+  fingerprints: [0482D84022F52DF1C4E7CD43293ACD0907D9495A]
+  notes: >-
+    Key 0482D84022F52DF1C4E7CD43293ACD0907D9495A (Natanael Copa) was
+    downloaded from https://alpinelinux.org/keys/ncopa.asc and its
+    fingerprint confirmed on https://alpinelinux.org/downloads/. The feed is
+    Alpine's own latest-releases.yaml, which carries the sha256.
+
+- id: alpine-standard
+  name: Alpine Linux (standard)
+  category: lightweight
+  description: Alpine as intended, a small installer image that needs a network connection.
+  homepage: https://alpinelinux.org/downloads/
+  arch: {amd64: x86_64, arm64: aarch64}
+  steps:
+    - fetch: https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/{arch}/latest-releases.yaml
+      jq: '.[] | select(.flavor == "alpine-standard") | {version, file: .iso, sha256}'
+  url: https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/{arch}/{file}
+  signature: {type: detached-iso, url: 'https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/{arch}/{filename}.asc'}
+  keys: [alpine-signing]
+  fingerprints: [0482D84022F52DF1C4E7CD43293ACD0907D9495A]
+  notes: >-
+    Key 0482D84022F52DF1C4E7CD43293ACD0907D9495A (Natanael Copa) was
+    downloaded from https://alpinelinux.org/keys/ncopa.asc and its
+    fingerprint confirmed on https://alpinelinux.org/downloads/. The feed is
+    Alpine's own latest-releases.yaml, which carries the sha256.
+
+- id: systemrescue
+  name: SystemRescue
+  category: rescue
+  description: Arch-based rescue toolkit for repairing disks, partitions and unbootable systems.
+  homepage: https://www.system-rescue.org/Download/
+  arch: {amd64: amd64}
+  steps:
+    - fetch: https://www.system-rescue.org/Download/
+      match: 'href="/releases/[\d.]+/(?P<file>systemrescue-(?P<version>\d+\.\d+(?:\.\d+)?)-{arch}\.iso)\.sha256"'
+      exclude: '(?i)alpha|beta|rc\d'
+  url: https://fastly-cdn.system-rescue.org/releases/{version}/{file}
+  checksum: {fetch: 'https://www.system-rescue.org/releases/{version}/{filename}.sha256'}
+  signature: {type: detached-iso, url: 'https://www.system-rescue.org/releases/{version}/{filename}.asc'}
+  keys: [systemrescue-signing]
+  fingerprints: [0FF11AF081E98345594812037091115F8320B897]
+  notes: >-
+    Key 0FF11AF081E98345594812037091115F8320B897 (Francois Dupoux, created
+    2021-07-04, expires 2039-12-31) was downloaded from
+    https://www.system-rescue.org/security/signing-keys/gnupg-pubkey-fdupoux-20210704-v001.pem,
+    the key file that https://www.system-rescue.org/Download/ links for
+    verifying the ISO's .asc signature. No SystemRescue page prints the
+    fingerprint, so it is pinned from that official key file and
+    cross-checked by the signature on the current release, which is made by
+    this key's signing subkey 62989046EB5C7E985ECDF5DD3B0FEA9BE13CA3C9. The
+    version comes from the download page, whose links are the project's own
+    release index; the ISO is served from the project's Fastly mirror that
+    the same page links. The sha256 is the project's published .sha256 file.
+
+- id: mx-linux
+  name: MX Linux (Xfce)
+  category: lightweight
+  description: Debian-based, Xfce desktop, built for stability and a light footprint.
+  homepage: https://mxlinux.org/download-links/
+  arch: {amd64: x64}
+  steps:
+    - fetch: https://rsync-mxlinux.org/MX/Final/Xfce/
+      match: 'href="(?P<file>MX-(?P<version>\d+(?:\.\d+)*)_Xfce_{arch}\.iso)"'
+    - fetch: https://rsync-mxlinux.org/MX/Final/Xfce/{file}.sha256
+      match: '(?m)^(?P<sha256>[0-9a-f]{64})  {file}$'
+  url: https://rsync-mxlinux.org/MX/Final/Xfce/{file}
+  notes: >-
+    Unsigned entry, on purpose. rsync-mxlinux.org is the MX project's master
+    ISO server (linked from https://mxlinux.org/wiki/other/detailed-iso-list/
+    as the mirror monitor), and the sha256 comes from it over HTTPS. The
+    release also ships .sig and .sha256.asc files made by key
+    F62EDEAA3AE70A9C99DAC4189B68A1E8B9B6375C (Dolphin Oracle), but no
+    official MX page that we could reach lists that fingerprint, so it is
+    not pinned. Add the signature once a fingerprint is confirmed on an
+    official MX page. The listing's README.txt is not used, because it can
+    lag the release. This entry tracks the Xfce edition and ignores the ahs,
+    KDE, Fluxbox and monthly snapshot images.
+
+- id: gparted-live
+  name: GParted Live
+  category: rescue
+  description: Bootable disk partition editor for resizing, copying and repairing partitions.
+  homepage: https://gparted.org/livecd.php
+  arch: {amd64: amd64}
+  steps:
+    - fetch: https://gparted.org/gparted-live/stable/CHECKSUMS.TXT
+      match: '### SHA256SUMS:[^#]*?(?P<sha256>[0-9a-f]{64})  (?P<file>gparted-live-(?P<version>\d+(?:\.\d+)*-\d+)-{arch}\.iso)'
+  url: https://downloads.sourceforge.net/project/gparted/gparted-live-stable/{version}/{file}
+  signature: {type: detached-checksums, url: 'https://gparted.org/gparted-live/stable/CHECKSUMS.TXT.gpg'}
+  keys: [gparted-signing]
+  fingerprints: [EB1DD5BF6F88820BBCF5356C8E94C9CD163E3FB0]
+  notes: >-
+    Key EB1DD5BF6F88820BBCF5356C8E94C9CD163E3FB0 (Steven Shiau, the GParted
+    Live maintainer) was downloaded from
+    https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xEB1DD5BF6F88820BBCF5356C8E94C9CD163E3FB0
+    and its fingerprint confirmed on https://gparted.org/gpg-verify.php. It
+    signs CHECKSUMS.TXT.gpg, the signature over CHECKSUMS.TXT, the file the
+    sha256 comes from. The stable directory on gparted.org holds only the
+    checksums, so the ISO comes from the project's SourceForge download
+    link, which the signed sha256 vouches for.
+
+- id: clonezilla-live
+  name: Clonezilla Live
+  category: rescue
+  description: Disk imaging and cloning live system, a free take on Ghost and True Image.
+  homepage: https://clonezilla.org/downloads.php
+  arch: {amd64: amd64}
+  steps:
+    - fetch: https://clonezilla.org/downloads/stable/data/CHECKSUMS.TXT
+      match: '### SHA256SUMS:[^#]*?(?P<sha256>[0-9a-f]{64})  (?P<file>clonezilla-live-(?P<version>\d+(?:\.\d+)*-\d+)-{arch}\.iso)'
+  url: https://downloads.sourceforge.net/project/clonezilla/clonezilla_live_stable/{version}/{file}
+  signature: {type: detached-checksums, url: 'https://clonezilla.org/downloads/stable/data/CHECKSUMS.TXT.gpg'}
+  keys: [clonezilla-signing]
+  fingerprints: [54C0821A48715DAFD61BFCAF667857D045599AFD]
+  notes: >-
+    Key 54C0821A48715DAFD61BFCAF667857D045599AFD (DRBL Project) was
+    downloaded from
+    https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x54C0821A48715DAFD61BFCAF667857D045599AFD
+    and its fingerprint confirmed on https://clonezilla.org/downloads.php. It
+    signs CHECKSUMS.TXT.gpg, the signature over CHECKSUMS.TXT, the file the
+    sha256 comes from. This entry follows the Debian-based stable branch,
+    which is the amd64 build. The ISO comes from the project's SourceForge
+    download link, which the signed sha256 vouches for.
+
+- id: rescuezilla
+  name: Rescuezilla
+  category: rescue
+  description: Graphical disk imaging and backup live system, a friendly front end for Clonezilla.
+  homepage: https://rescuezilla.com/
+  arch: {amd64: 64bit}
+  steps:
+    - fetch: https://api.github.com/repos/rescuezilla/rescuezilla/releases/latest
+      jq: '.tag_name as $t | ["resolute", "questing", "plucky", "oracular", "noble", "jammy", "focal"] as $order | [.assets[] | select(.name | test("^rescuezilla-[0-9][0-9.]*-" + $arch + "\\.[a-z]+\\.iso$")) | (.name | capture("\\.(?<b>[a-z]+)\\.iso$").b) as $base | {version: ($t | ltrimstr("v")), url: .browser_download_url, sha256: (.digest | ltrimstr("sha256:")), rank: ($order | index($base) // 99)}] | sort_by(.rank) | .[0] | {version, url, sha256}'
+  url: '{url}'
+  notes: >-
+    Hosted on GitHub, so it can't be checked from the cloud sandbox and the
+    weekly CI job covers it. The feed is GitHub's documented latest-release
+    JSON, which skips drafts and prereleases, and each asset's digest field
+    carries the sha256 that GitHub computed at upload. Rescuezilla builds one
+    ISO per Ubuntu base, such as rescuezilla-2.6-64bit.noble.iso, and the
+    program picks the newest base it knows, falling back to any other. The
+    project publishes no arm64 ISO, so only amd64 is listed.
+    Unsigned: no official page that we could reach lists a signing
+    fingerprint to pin.
+
+- id: netboot-xyz
+  name: netboot.xyz
+  category: rescue
+  description: Tiny boot ISO that loads installers and live systems for many distros over the network.
+  homepage: https://netboot.xyz/downloads/
+  arch: {amd64: amd64, arm64: arm64}
+  steps:
+    - fetch: https://api.github.com/repos/netbootxyz/netboot.xyz/releases/latest
+      jq: '.tag_name as $t | .assets[] | select(.name == (if $arch == "arm64" then "netboot.xyz-arm64.iso" else "netboot.xyz.iso" end)) | {version: ($t | ltrimstr("v")), url: .browser_download_url, sha256: (.digest | ltrimstr("sha256:"))}'
+  url: '{url}'
+  filename: netboot.xyz-{version}-{arch}.iso
+  notes: >-
+    Hosted on GitHub, so it can't be checked from the cloud sandbox and the
+    weekly CI job covers it. The feed is GitHub's documented latest-release
+    JSON, and each asset's digest field carries the sha256 that GitHub
+    computed at upload. The upstream names are netboot.xyz.iso and
+    netboot.xyz-arm64.iso with no version in them, so the filename template
+    adds it. netboot.xyz doesn't sign its releases.
+
+- id: shredos
+  name: ShredOS
+  category: rescue
+  description: Bootable secure disk eraser built around nwipe, for wiping drives before disposal.
+  homepage: https://github.com/PartialVolume/shredos.x86_64
+  arch: {amd64: x86-64}
+  steps:
+    - fetch: https://api.github.com/repos/PartialVolume/shredos.x86_64/releases/latest
+      jq: '.tag_name as $t | [.assets[] | select(.name | test("^shredos-.*" + $arch + ".*\\.iso$")) | select(.name | test("vanilla|config") | not) | {version: ($t | ltrimstr("v")), url: .browser_download_url, sha256: (.digest | ltrimstr("sha256:")), len: (.name | length)}] | sort_by(.len) | .[0] | {version, url, sha256}'
+  url: '{url}'
+  notes: >-
+    Hosted on GitHub, so it can't be checked from the cloud sandbox and the
+    weekly CI job covers it. The feed is GitHub's documented latest-release
+    JSON, and each asset's digest field carries the sha256 that GitHub
+    computed at upload. Release tags look like
+    v2025.11.2_28_x86-64_0.39 and the ISO names embed the tag without the v,
+    so the tag is the version. If a release ships variant ISOs, the program
+    skips vanilla and config builds and takes the shortest remaining name.
+    The project builds only x86-64 here. ShredOS doesn't sign its releases.
